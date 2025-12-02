@@ -1,6 +1,7 @@
 import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
 import { authApi, User, AuthTokens, LoginCredentials, RegisterData, ApiError } from '@/lib/api';
 import { useNavigate } from 'react-router-dom';
+import { useQueryClient } from '@tanstack/react-query';
 
 interface AuthContextType {
   user: User | null;
@@ -33,6 +34,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const navigate = useNavigate();
+  const queryClient = useQueryClient();
 
   // Store tokens in localStorage
   const saveTokens = (tokens: AuthTokens) => {
@@ -71,6 +73,10 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     try {
       const response = await authApi.login(credentials);
       saveTokens(response.data.tokens);
+      
+      // Clear ALL cached data from previous user before setting new user
+      queryClient.clear();
+      
       setUser(response.data.user);
       
       // Navigate based on role
@@ -97,6 +103,10 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     try {
       const response = await authApi.register(data);
       saveTokens(response.data.tokens);
+      
+      // Clear ALL cached data before setting new user
+      queryClient.clear();
+      
       setUser(response.data.user);
       navigate('/student/dashboard');
     } catch (err) {
@@ -114,8 +124,10 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
   const logout = useCallback(() => {
     clearTokens();
     setUser(null);
+    // Clear ALL cached data on logout
+    queryClient.clear();
     navigate('/');
-  }, [navigate]);
+  }, [navigate, queryClient]);
 
   const refreshUser = useCallback(async () => {
     try {

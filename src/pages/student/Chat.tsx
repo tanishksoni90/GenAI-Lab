@@ -6,17 +6,59 @@ import { Progress } from "@/components/ui/progress";
 import SkyToggle from "@/components/ui/sky-toggle";
 import { useNavigate, useParams, useSearchParams, useLocation } from "react-router-dom";
 import { useTheme } from "@/contexts/ThemeContext";
-import { useUser, ChatMessage } from "@/contexts/UserContext";
+import { useAuth } from "@/contexts/AuthContext";
+import { useToast } from "@/hooks/use-toast";
+import { 
+  useSession,
+  useCreateSession,
+  useSendMessage,
+  useRecentSessions,
+  useDashboardStats,
+  useModels
+} from "@/hooks/useStudentData";
+import { Message } from "@/lib/api";
 import { 
   ArrowLeft, Send, Plus, MessageSquare, EyeOff, Bot, 
   Sparkles, Zap, Code, Target, TrendingUp, AlertTriangle,
   Copy, ThumbsUp, ThumbsDown, RefreshCw, PanelRightClose,
   PanelRight, Paperclip, Loader2, CheckCircle, Info,
-  Image as ImageIcon, Volume2
+  Image as ImageIcon, Volume2, Check
 } from "lucide-react";
-import { useState, useEffect, useRef } from "react";
-import { mockAIModels } from "@/lib/mockData";
+import { useState, useEffect, useRef, useMemo } from "react";
 import { calculateRequestCost } from "@/lib/modelPricing";
+
+// Extended message type for UI display
+interface ChatMessage {
+  id: string;
+  role: 'user' | 'assistant' | 'system';
+  content: string;
+  timestamp?: string;
+  score?: number;
+  scoreBreakdown?: { 
+    clarity: number; 
+    specificity: number; 
+    context: number; 
+    relevance: number;
+    structure?: number;
+    constraints?: number;
+  };
+  tokensUsed?: number;
+  tokens?: number;
+  blocked?: boolean;
+  blockReason?: string;
+  feedback?: {
+    strengths?: string[];
+    improvements?: string[];
+    biggestGap?: string;
+    suggestion?: string;
+  };
+  comparison?: {
+    weakExample?: { prompt: string; issue: string };
+    strongExample?: { prompt: string; why: string };
+  };
+  guidingQuestions?: string[];
+  createdAt?: string;
+}
 
 const StudentChat = () => {
   const navigate = useNavigate();
@@ -24,38 +66,58 @@ const StudentChat = () => {
   const { modelId } = useParams();
   const [searchParams] = useSearchParams();
   const { isDark, toggleTheme } = useTheme();
-  const { 
-    stats, 
-    sessions,
-    createSession, 
-    getSession, 
-    addMessageToSession, 
-    getSessionMessages,
-    artifacts,
-    refreshStats
-  } = useUser();
+  const { user } = useAuth();
+  const { toast } = useToast();
+  
+  // Backend API hooks
+  const { data: dashboardData } = useDashboardStats();
+  const { data: modelsData = [] } = useModels();
+  const { data: recentSessionsData = [] } = useRecentSessions(10);
+  const createSessionMutation = useCreateSession();
+  const sendMessageMutation = useSendMessage();
+  
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  
+  // Track copied and feedback states for message buttons
+  const [copiedMessageId, setCopiedMessageId] = useState<string | null>(null);
+  const [feedbackGiven, setFeedbackGiven] = useState<Record<string, 'up' | 'down' | null>>({});
   
   // Check if we're opening an existing session or a new one
   const sessionIdFromUrl = searchParams.get('session');
   const [currentSessionId, setCurrentSessionId] = useState<string | null>(sessionIdFromUrl);
   
+  // Fetch current session data from backend
+  const { data: currentSessionData, refetch: refetchSession } = useSession(currentSessionId || '');
+  
+  // Artifacts (empty for now - could be fetched per session)
+  const artifacts: any[] = [];
+  
   // Track where user came from for back button
   const cameFromSession = sessionIdFromUrl !== null;
   
-  // Determine the current model based on modelId or session
-  const getModelFromId = (id?: string) => {
-    const targetId = id || modelId;
+  // Get stats from dashboard API
+  const stats = {
+    tokenBalance: dashboardData?.tokens?.remaining || 50000,
+    tokenQuota: dashboardData?.tokens?.quota || 50000,
+  };
+  
+  // Determine the current model based on modelId or session - memoized
+  const currentModel = useMemo(() => {
+    // First check session data
+    if (currentSessionData?.model) {
+      return currentSessionData.model;
+    }
+    
+    const targetId = modelId;
     if (targetId === "dalle-3") {
-      return { 
+      return {
         id: "dalle-3", 
         name: "DALL-E 3", 
         provider: "OpenAI", 
         category: "image",
         description: "Generate stunning images from text descriptions",
-        enabled: true,
-        tokensPerRequest: 500,
-        features: ["Image Generation", "High Quality", "Creative Art"]
+        isActive: true,
+        inputCost: 500,
       };
     }
     if (targetId === "elevenlabs") {
@@ -65,63 +127,108 @@ const StudentChat = () => {
         provider: "ElevenLabs", 
         category: "audio",
         description: "Convert text to natural-sounding speech",
-        enabled: true,
-        tokensPerRequest: 200,
-        features: ["Text-to-Speech", "Multilingual", "Natural Voice"]
+        isActive: true,
+        inputCost: 200,
       };
     }
-    return mockAIModels.find(m => m.id === targetId) || mockAIModels[0];
-  };
+    // Find from API models
+    const apiModel = modelsData.find(m => m.id === targetId);
+    if (apiModel) return apiModel;
+    // Fallback to first model or default
+    return modelsData[0] || { id: '1', name: 'GPT-4', provider: 'OpenAI', category: 'text', isActive: true, inputCost: 1 };
+  }, [modelId, modelsData, currentSessionData?.model]);
   
-  // If opening from a session, get model from session
-  const existingSession = sessionIdFromUrl ? getSession(sessionIdFromUrl) : null;
-  const currentModel = existingSession ? getModelFromId(existingSession.modelId) : getModelFromId();
-  const isImageModel = currentModel.category === "image";
-  const isAudioModel = currentModel.category === "audio";
+  const isImageModel = currentModel?.category === "image";
+  const isAudioModel = currentModel?.category === "audio";
   
-  // Get appropriate welcome message based on model type
-  const getWelcomeMessage = (): ChatMessage => ({
+  // Get appropriate welcome message based on model type - memoized to avoid recreating on every render
+  const welcomeMessage = useMemo((): ChatMessage => ({
     id: "welcome-1",
     role: "assistant",
     content: isImageModel 
       ? "Hello! I'm **DALL-E 3**, your image generation assistant. I can create stunning images from your text descriptions.\n\n✨ **Tips for great prompts:**\n• Be specific about style (photorealistic, cartoon, oil painting, etc.)\n• Describe colors, lighting, and mood\n• Include details about composition and perspective\n\n**Example:** \"A cozy coffee shop on a rainy evening, warm lighting through foggy windows, watercolor style\"\n\nWhat would you like me to create today?"
       : isAudioModel
       ? "Hello! I'm **Eleven Multilingual v2**, your text-to-speech assistant. I can convert your text into natural-sounding speech.\n\n🎙️ **How to use:**\n• Type or paste the text you want me to read\n• I'll generate high-quality audio\n• Supports multiple languages\n\n**Example:** \"Welcome to our product demo. Today we'll be exploring the latest features...\"\n\nWhat text would you like me to convert to speech?"
-      : "Hello! I'm your AI learning assistant. How can I help you today? I can assist with:\n\n• **Coding questions** - Explain concepts, debug code, or help you learn new languages\n• **Research** - Help you find information and understand complex topics\n• **Writing** - Assist with essays, documentation, or creative writing\n• **Problem solving** - Work through logical problems step by step\n\nWhat would you like to explore?",
+      : `Hello! I'm **${currentModel?.name || 'your AI assistant'}**. How can I help you today? I can assist with:\n\n• **Coding questions** - Explain concepts, debug code, or help you learn new languages\n• **Research** - Help you find information and understand complex topics\n• **Writing** - Assist with essays, documentation, or creative writing\n• **Problem solving** - Work through logical problems step by step\n\nWhat would you like to explore?`,
     timestamp: new Date().toLocaleTimeString(),
-  });
+  }), [isImageModel, isAudioModel, currentModel?.name]);
   
-  // Initialize messages from existing session or empty
-  const [messages, setMessages] = useState<ChatMessage[]>(() => {
-    if (existingSession && existingSession.messages.length > 0) {
-      return existingSession.messages;
+  // Initialize messages state
+  const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const [hasInitialized, setHasInitialized] = useState(false);
+  
+  // Initialize welcome message on first render
+  useEffect(() => {
+    if (!hasInitialized && !currentSessionId) {
+      setMessages([welcomeMessage]);
+      setHasInitialized(true);
     }
-    return [getWelcomeMessage()];
-  });
+  }, [hasInitialized, currentSessionId, welcomeMessage]);
   
   const [inputMessage, setInputMessage] = useState("");
   const [showArtifacts, setShowArtifacts] = useState(true);
   const [isTyping, setIsTyping] = useState(false);
   
-  // Calculate session tokens used from messages
-  const sessionTokensUsed = messages.reduce((acc, m) => acc + (m.tokensUsed || 0), 0);
+  // Calculate session tokens used from current session or messages
+  const sessionTokensUsed = currentSessionData?.tokensUsed || messages.reduce((acc, m) => acc + (m.tokensUsed || m.tokens || 0), 0);
   
-  // Load session messages when sessionId changes
+  // Load session messages when session data changes from API
   useEffect(() => {
-    if (sessionIdFromUrl) {
-      const session = getSession(sessionIdFromUrl);
-      if (session && session.messages.length > 0) {
-        setMessages(session.messages);
-        setCurrentSessionId(sessionIdFromUrl);
+    if (currentSessionData?.messages && currentSessionData.messages.length > 0) {
+      // Convert API messages to ChatMessage format, parsing feedback JSON
+      const chatMessages: ChatMessage[] = currentSessionData.messages.map(m => {
+        // Parse the feedback field which contains the full scoreResult
+        let scoreResult: any = null;
+        if (m.feedback) {
+          try {
+            scoreResult = typeof m.feedback === 'string' ? JSON.parse(m.feedback) : m.feedback;
+          } catch (e) {
+            console.warn('Failed to parse feedback JSON:', e);
+          }
+        }
+        
+        return {
+          id: m.id,
+          role: m.role,
+          content: m.content,
+          timestamp: new Date(m.createdAt).toLocaleTimeString(),
+          score: m.score,
+          tokensUsed: m.tokens,
+          scoreBreakdown: scoreResult?.criteria,
+          feedback: scoreResult?.feedback,
+          comparison: scoreResult?.comparison,
+        };
+      });
+      setMessages(chatMessages);
+    } else if (!currentSessionId) {
+      // New chat - show welcome message
+      setMessages([welcomeMessage]);
+    }
+  }, [currentSessionData, welcomeMessage, currentSessionId]);
+  
+  // Update current session ID when URL changes
+  useEffect(() => {
+    const newSessionId = sessionIdFromUrl;
+    if (newSessionId !== currentSessionId) {
+      setCurrentSessionId(newSessionId);
+      // If switching to a different session or new chat, reset messages until data loads
+      if (newSessionId) {
+        setMessages([]); // Will be populated by currentSessionData effect
+      } else {
+        setMessages([welcomeMessage]);
       }
     }
-  }, [sessionIdFromUrl, getSession]);
+  }, [sessionIdFromUrl]);
 
-  // Calculate session score (average of all prompt scores)
+  // Get scored user messages for display
   const userMessages = messages.filter(m => m.role === "user" && m.score !== undefined && m.score > 0);
-  const sessionScore = userMessages.length > 0
-    ? Math.round(userMessages.reduce((acc, m) => acc + (m.score || 0), 0) / userMessages.length)
-    : 0;
+
+  // Calculate session score from current session data or messages
+  const sessionScore = currentSessionData?.avgScore || (
+    userMessages.length > 0
+      ? Math.round(userMessages.reduce((acc, m) => acc + (m.score || 0), 0) / userMessages.length)
+      : 0
+  );
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -131,7 +238,7 @@ const StudentChat = () => {
     scrollToBottom();
   }, [messages, isTyping]);
 
-  // Simulate prompt scoring
+  // Simulate prompt scoring (will be replaced by backend scoring)
   const scorePrompt = (prompt: string, previousMessages: ChatMessage[]) => {
     const blockedWords = ["hack", "cheat", "bypass"];
     const isBlocked = blockedWords.some(word => prompt.toLowerCase().includes(word));
@@ -218,86 +325,95 @@ const StudentChat = () => {
     return { score, breakdown, blocked: false, feedback };
   };
 
-  const handleSendMessage = () => {
-    if (!inputMessage.trim()) return;
+  const handleSendMessage = async () => {
+    if (!inputMessage.trim() || sendMessageMutation.isPending) return;
 
-    const inputTokens = Math.ceil(inputMessage.length / 4);
-    const estimatedOutputTokens = 150;
-    const userTokenCost = calculateRequestCost(currentModel.id, inputTokens, 0, inputMessage.length);
-    const responseTokenCost = calculateRequestCost(currentModel.id, 0, estimatedOutputTokens, inputMessage.length);
-    const totalCost = userTokenCost + responseTokenCost;
+    const messageContent = inputMessage;
+    setInputMessage("");
     
-    if (stats.tokenBalance < totalCost) {
-      return;
-    }
-
     // Create session if this is the first message in a new chat
     let activeSessionId = currentSessionId;
     if (!activeSessionId) {
-      const session = createSession(
-        currentModel.id, 
-        currentModel.name, 
-        currentModel.category as 'text' | 'image' | 'audio'
-      );
-      activeSessionId = session.id;
-      setCurrentSessionId(session.id);
+      try {
+        const newSession = await createSessionMutation.mutateAsync({ 
+          modelId: currentModel.id 
+        });
+        activeSessionId = newSession.id;
+        setCurrentSessionId(newSession.id);
+        // Update URL to include session
+        navigate(`/student/chat/${currentModel.id}?session=${newSession.id}`, { replace: true });
+      } catch (error) {
+        console.error('Failed to create session:', error);
+        return;
+      }
     }
 
-    const { score, breakdown, blocked, blockReason, feedback } = scorePrompt(inputMessage, messages);
-
-    const newUserMessage: ChatMessage = {
-      id: `msg-${Date.now()}`,
+    // Add optimistic user message to UI
+    const tempUserMessage: ChatMessage = {
+      id: `temp-${Date.now()}`,
       role: "user",
-      content: inputMessage,
+      content: messageContent,
       timestamp: new Date().toLocaleTimeString(),
-      score: blocked ? 0 : score,
-      scoreBreakdown: breakdown,
-      tokensUsed: userTokenCost,
-      blocked,
-      blockReason,
-      feedback: feedback || undefined,
     };
-
-    const updatedMessages = [...messages, newUserMessage];
-    setMessages(updatedMessages);
-    setInputMessage("");
-    
-    // Save user message to session
-    if (activeSessionId) {
-      addMessageToSession(activeSessionId, newUserMessage, userTokenCost, blocked ? undefined : score);
-    }
-
-    if (blocked) {
-      return;
-    }
-
+    setMessages(prev => [...prev, tempUserMessage]);
     setIsTyping(true);
 
-    setTimeout(() => {
-      const newAssistantMessage: ChatMessage = {
-        id: `msg-${Date.now() + 1}`,
-        role: "assistant",
-        content: isImageModel 
-          ? "🎨 I've generated your image based on your description!\n\n[Image would appear here]\n\n**Generation Details:**\n• Style: Based on your prompt\n• Resolution: 1024x1024\n• Model: DALL-E 3\n\nWould you like me to modify this image or create a new one with different parameters?"
-          : isAudioModel
-          ? "🎙️ I've converted your text to speech!\n\n[Audio player would appear here]\n\n**Audio Details:**\n• Duration: ~" + Math.ceil(inputMessage.length / 15) + " seconds\n• Voice: Natural multilingual\n• Format: MP3\n\nWould you like me to regenerate with different settings?"
-          : "That's a great question! Let me help you understand this better.\n\nHere's a comprehensive explanation with examples:\n\n```python\ndef example_function():\n    # This is a sample code block\n    result = process_data()\n    return result\n```\n\nThe key concepts to understand here are:\n\n1. **First concept** - This helps establish the foundation\n2. **Second concept** - Building on what we learned\n3. **Third concept** - Putting it all together\n\nWould you like me to elaborate on any of these points?",
-        timestamp: new Date().toLocaleTimeString(),
-        tokensUsed: responseTokenCost,
-      };
+    try {
+      // Send message to backend
+      const result = await sendMessageMutation.mutateAsync({
+        sessionId: activeSessionId,
+        content: messageContent,
+      });
       
-      setMessages(prev => [...prev, newAssistantMessage]);
+      // Update messages with actual response from backend
+      setMessages(prev => {
+        // Remove temp message, add real user and assistant messages
+        const withoutTemp = prev.filter(m => m.id !== tempUserMessage.id);
+        const newMessages: ChatMessage[] = [...withoutTemp];
+        
+        // Add user message if present
+        if (result?.userMessage) {
+          const scoreResult = result.userMessage.scoreResult;
+          newMessages.push({
+            id: result.userMessage.id || `user-${Date.now()}`,
+            role: 'user' as const,
+            content: result.userMessage.content || messageContent,
+            timestamp: result.userMessage.createdAt 
+              ? new Date(result.userMessage.createdAt).toLocaleTimeString()
+              : new Date().toLocaleTimeString(),
+            score: result.userMessage.score,
+            tokensUsed: result.userMessage.tokens,
+            feedback: scoreResult?.feedback,
+            scoreBreakdown: scoreResult?.criteria,
+            comparison: scoreResult?.comparison as ChatMessage['comparison'],
+          });
+        }
+        
+        // Add assistant message if present
+        if (result?.assistantMessage) {
+          newMessages.push({
+            id: result.assistantMessage.id || `assistant-${Date.now()}`,
+            role: 'assistant' as const,
+            content: result.assistantMessage.content || 'Response received.',
+            timestamp: result.assistantMessage.createdAt
+              ? new Date(result.assistantMessage.createdAt).toLocaleTimeString()
+              : new Date().toLocaleTimeString(),
+            tokensUsed: result.assistantMessage.tokens,
+          });
+        }
+        
+        return newMessages;
+      });
       
-      // Save assistant message to session
-      if (activeSessionId) {
-        addMessageToSession(activeSessionId, newAssistantMessage, responseTokenCost);
-      }
-      
+      // Refetch session to get updated stats
+      refetchSession();
+    } catch (error) {
+      console.error('Failed to send message:', error);
+      // Remove optimistic message on error
+      setMessages(prev => prev.filter(m => m.id !== tempUserMessage.id));
+    } finally {
       setIsTyping(false);
-      
-      // Refresh stats to update dashboard
-      refreshStats();
-    }, 1500);
+    }
   };
 
   // Handle back button
@@ -312,9 +428,87 @@ const StudentChat = () => {
     }
   };
 
-  // Get recent sessions for this model
-  const recentModelSessions = sessions
-    .filter(s => s.modelId === currentModel.id && s.id !== currentSessionId)
+  // Copy message to clipboard
+  const handleCopyMessage = async (messageId: string, content: string) => {
+    try {
+      await navigator.clipboard.writeText(content);
+      setCopiedMessageId(messageId);
+      toast({
+        title: "Copied!",
+        description: "Message copied to clipboard",
+      });
+      // Reset after 2 seconds
+      setTimeout(() => setCopiedMessageId(null), 2000);
+    } catch (err) {
+      toast({
+        title: "Failed to copy",
+        description: "Could not copy to clipboard",
+        variant: "destructive",
+      });
+    }
+  };
+
+  // Handle thumbs up/down feedback
+  const handleFeedback = (messageId: string, type: 'up' | 'down') => {
+    setFeedbackGiven(prev => ({
+      ...prev,
+      [messageId]: prev[messageId] === type ? null : type
+    }));
+    toast({
+      title: type === 'up' ? "Thanks for the feedback!" : "We'll improve",
+      description: type === 'up' 
+        ? "Glad this response was helpful" 
+        : "Sorry this wasn't helpful. We'll work on it.",
+    });
+  };
+
+  // Handle regenerate response
+  const handleRegenerate = async (messageIndex: number) => {
+    // Find the user message before this assistant message
+    const userMessageIndex = messageIndex - 1;
+    if (userMessageIndex >= 0 && messages[userMessageIndex]?.role === 'user') {
+      const userContent = messages[userMessageIndex].content;
+      
+      // Remove the assistant message we're regenerating
+      setMessages(prev => prev.filter((_, i) => i !== messageIndex));
+      
+      // Resend the user message
+      if (currentSessionId) {
+        setIsTyping(true);
+        try {
+          const result = await sendMessageMutation.mutateAsync({
+            sessionId: currentSessionId,
+            content: userContent,
+          });
+          
+          // Add the new assistant response
+          if (result?.assistantMessage) {
+            setMessages(prev => [...prev, {
+              id: result.assistantMessage.id || `assistant-${Date.now()}`,
+              role: 'assistant' as const,
+              content: result.assistantMessage.content || 'Response received.',
+              timestamp: result.assistantMessage.createdAt
+                ? new Date(result.assistantMessage.createdAt).toLocaleTimeString()
+                : new Date().toLocaleTimeString(),
+              tokensUsed: result.assistantMessage.tokens,
+            }]);
+          }
+        } catch (error) {
+          toast({
+            title: "Failed to regenerate",
+            description: "Could not regenerate response. Please try again.",
+            variant: "destructive",
+          });
+        } finally {
+          setIsTyping(false);
+        }
+      }
+    }
+  };
+
+  // Get recent sessions for this model from API (show current model sessions, excluding current one)
+  const recentModelSessions = recentSessionsData
+    .filter(s => s.modelId === currentModel?.id && s.id !== currentSessionId)
     .slice(0, 5);
 
   return (
@@ -340,14 +534,11 @@ const StudentChat = () => {
             className="w-full gradient-primary glow-primary btn-press font-semibold" 
             size="sm"
             onClick={() => {
-              const session = createSession(
-                currentModel.id, 
-                currentModel.name, 
-                currentModel.category as 'text' | 'image' | 'audio'
-              );
-              setCurrentSessionId(session.id);
-              setMessages([getWelcomeMessage()]);
+              // Reset to new chat state
+              setCurrentSessionId(null);
+              setMessages([welcomeMessage]);
               setInputMessage("");
+              setHasInitialized(true);
               // Update URL to remove session param
               navigate(`/student/chat/${currentModel.id}`, { replace: true });
             }}
@@ -381,7 +572,23 @@ const StudentChat = () => {
         <ScrollArea className="flex-1">
           <div className="p-3 space-y-2">
             <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider px-2 mb-3">Recent Chats</p>
-            {recentModelSessions.length === 0 ? (
+            
+            {/* Current Session (if exists) */}
+            {currentSessionId && currentSessionData && (
+              <div className="mb-2">
+                <div className="w-full text-left h-auto py-2 px-3 rounded-lg bg-primary/10 border border-primary/20">
+                  <div className="flex-1 min-w-0">
+                    <p className="text-xs font-medium truncate text-primary">{currentSessionData.title || 'Current Chat'}</p>
+                    <p className="text-[10px] text-muted-foreground">
+                      {currentSessionData.promptCount || messages.filter(m => m.role === 'user').length} prompts • {currentSessionData.tokensUsed || 0} tokens
+                    </p>
+                  </div>
+                </div>
+              </div>
+            )}
+            
+            {/* Other Recent Sessions */}
+            {recentModelSessions.length === 0 && !currentSessionId ? (
               <div className="text-center text-xs text-muted-foreground py-6">
                 <MessageSquare className="w-8 h-8 mx-auto mb-2 opacity-30" />
                 <p>No recent chats</p>
@@ -394,13 +601,14 @@ const StudentChat = () => {
                   variant="ghost"
                   className="w-full justify-start text-left h-auto py-2 px-3 hover:bg-white/5"
                   onClick={() => {
-                    navigate(`/student/chat/${session.modelId}?session=${session.id}`);
+                    setCurrentSessionId(session.id);
+                    navigate(`/student/chat/${session.modelId}?session=${session.id}`, { replace: true });
                   }}
                 >
                   <div className="flex-1 min-w-0">
-                    <p className="text-xs font-medium truncate">{session.title}</p>
+                    <p className="text-xs font-medium truncate">{session.title || 'Untitled Chat'}</p>
                     <p className="text-[10px] text-muted-foreground">
-                      {session.messageCount} prompts • {session.tokensUsed} tokens
+                      {session.promptCount} prompts • {session.tokensUsed} tokens
                     </p>
                   </div>
                 </Button>
@@ -511,7 +719,7 @@ const StudentChat = () => {
         {/* Messages Area */}
         <div className="flex-1 overflow-y-auto custom-scrollbar">
           <div className="max-w-4xl mx-auto px-6 py-6 space-y-6">
-            {messages.map((message) => (
+            {messages.map((message, messageIndex) => (
               <div
                 key={message.id}
                 className={`flex gap-4 animate-fade-in ${message.role === "user" ? "justify-end" : "justify-start"}`}
@@ -580,17 +788,42 @@ const StudentChat = () => {
                     <span className="text-xs text-muted-foreground mr-2">{message.timestamp}</span>
                     {message.role === "assistant" && (
                       <>
-                        <Button variant="ghost" size="icon" className="h-7 w-7 hover:bg-white/5">
-                          <Copy className="w-3.5 h-3.5" />
+                        <Button 
+                          variant="ghost" 
+                          size="icon" 
+                          className="h-7 w-7 hover:bg-white/5"
+                          onClick={() => handleCopyMessage(message.id, message.content)}
+                        >
+                          {copiedMessageId === message.id ? (
+                            <Check className="w-3.5 h-3.5 text-green-500" />
+                          ) : (
+                            <Copy className="w-3.5 h-3.5" />
+                          )}
                         </Button>
-                        <Button variant="ghost" size="icon" className="h-7 w-7 hover:bg-white/5">
+                        <Button 
+                          variant="ghost" 
+                          size="icon" 
+                          className={`h-7 w-7 hover:bg-white/5 ${feedbackGiven[message.id] === 'up' ? 'text-green-500 bg-green-500/10' : ''}`}
+                          onClick={() => handleFeedback(message.id, 'up')}
+                        >
                           <ThumbsUp className="w-3.5 h-3.5" />
                         </Button>
-                        <Button variant="ghost" size="icon" className="h-7 w-7 hover:bg-white/5">
+                        <Button 
+                          variant="ghost" 
+                          size="icon" 
+                          className={`h-7 w-7 hover:bg-white/5 ${feedbackGiven[message.id] === 'down' ? 'text-red-500 bg-red-500/10' : ''}`}
+                          onClick={() => handleFeedback(message.id, 'down')}
+                        >
                           <ThumbsDown className="w-3.5 h-3.5" />
                         </Button>
-                        <Button variant="ghost" size="icon" className="h-7 w-7 hover:bg-white/5">
-                          <RefreshCw className="w-3.5 h-3.5" />
+                        <Button 
+                          variant="ghost" 
+                          size="icon" 
+                          className="h-7 w-7 hover:bg-white/5"
+                          onClick={() => handleRegenerate(messageIndex)}
+                          disabled={sendMessageMutation.isPending}
+                        >
+                          <RefreshCw className={`w-3.5 h-3.5 ${sendMessageMutation.isPending ? 'animate-spin' : ''}`} />
                         </Button>
                       </>
                     )}
@@ -799,7 +1032,7 @@ const StudentChat = () => {
                   )}
 
                   {/* Learning Through Comparison */}
-                  {latestUserMessage.feedback && (
+                  {latestUserMessage.comparison?.weakExample && latestUserMessage.comparison?.strongExample && (
                     <div className="glass rounded-xl p-4">
                       <div className="flex items-center gap-2 mb-3">
                         <Sparkles className="w-4 h-4 text-cyan-400" />
@@ -811,54 +1044,47 @@ const StudentChat = () => {
                             <ThumbsDown className="w-3 h-3 text-pink-400" />
                             <span className="text-xs font-medium text-pink-400">Weak Prompt</span>
                           </div>
-                          <p className="text-xs font-mono bg-black/20 p-2 rounded mb-2">"{latestUserMessage.feedback.weakExample.prompt}"</p>
-                          <p className="text-[10px] text-pink-300">⚠️ {latestUserMessage.feedback.weakExample.issue}</p>
+                          <p className="text-xs font-mono bg-black/20 p-2 rounded mb-2">"{latestUserMessage.comparison.weakExample.prompt}"</p>
+                          <p className="text-[10px] text-pink-300">⚠️ {latestUserMessage.comparison.weakExample.issue}</p>
                         </div>
                         <div className="p-3 rounded-lg bg-emerald-500/10 border border-emerald-500/20">
                           <div className="flex items-center gap-2 mb-2">
                             <ThumbsUp className="w-3 h-3 text-emerald-400" />
                             <span className="text-xs font-medium text-emerald-400">Strong Prompt</span>
                           </div>
-                          <p className="text-xs font-mono bg-black/20 p-2 rounded mb-2">"{latestUserMessage.feedback.strongExample.prompt}"</p>
-                          <p className="text-[10px] text-emerald-300">✓ {latestUserMessage.feedback.strongExample.why}</p>
+                          <p className="text-xs font-mono bg-black/20 p-2 rounded mb-2">"{latestUserMessage.comparison.strongExample.prompt}"</p>
+                          <p className="text-[10px] text-emerald-300">✓ {latestUserMessage.comparison.strongExample.why}</p>
                         </div>
                       </div>
                     </div>
                   )}
 
-                  {/* Questions to Guide Your Thinking */}
-                  {latestUserMessage.feedback?.guidingQuestions && (latestUserMessage.score || 0) < 80 && (
+                  {/* Improvements Suggestions */}
+                  {latestUserMessage.feedback?.improvements && latestUserMessage.feedback.improvements.length > 0 && (latestUserMessage.score || 0) < 80 && (
                     <div className="glass rounded-xl p-4">
                       <div className="flex items-center gap-2 mb-3">
-                        <Info className="w-4 h-4 text-blue-400" />
-                        <h4 className="text-sm font-semibold">Questions to Consider</h4>
+                        <Target className="w-4 h-4 text-blue-400" />
+                        <h4 className="text-sm font-semibold text-blue-400">Improvements</h4>
                       </div>
                       <ul className="space-y-2">
-                        {latestUserMessage.feedback.guidingQuestions.map((question, idx) => (
+                        {latestUserMessage.feedback.improvements.map((improvement, idx) => (
                           <li key={idx} className="flex items-start gap-2 text-xs">
-                            <span className="text-blue-400 mt-0.5">?</span>
-                            <span className="text-muted-foreground italic">{question}</span>
+                            <span className="text-blue-400 mt-0.5">→</span>
+                            <span className="text-muted-foreground">{improvement}</span>
                           </li>
                         ))}
                       </ul>
                     </div>
                   )}
 
-                  {/* What to Try Next */}
-                  {latestUserMessage.feedback?.whatToTryNext && (
-                    <div className="glass rounded-xl p-4 border border-primary/20">
+                  {/* Suggestion */}
+                  {latestUserMessage.feedback?.suggestion && (latestUserMessage.score || 0) < 80 && (
+                    <div className="glass rounded-xl p-4 border border-cyan-500/20">
                       <div className="flex items-center gap-2 mb-3">
-                        <TrendingUp className="w-4 h-4 text-primary" />
-                        <h4 className="text-sm font-semibold text-primary">What to Try Next</h4>
+                        <Info className="w-4 h-4 text-cyan-400" />
+                        <h4 className="text-sm font-semibold text-cyan-400">Suggestion</h4>
                       </div>
-                      <ul className="space-y-2">
-                        {latestUserMessage.feedback.whatToTryNext.map((tip, idx) => (
-                          <li key={idx} className="flex items-start gap-2 text-xs">
-                            <span className="text-primary font-bold">{idx + 1}.</span>
-                            <span className="text-muted-foreground">{tip}</span>
-                          </li>
-                        ))}
-                      </ul>
+                      <p className="text-xs text-muted-foreground italic">{latestUserMessage.feedback.suggestion}</p>
                     </div>
                   )}
 

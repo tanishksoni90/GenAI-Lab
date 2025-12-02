@@ -19,6 +19,7 @@ interface UpdateAgentInput {
   strictMode?: boolean;
   knowledgeBase?: string[];
   guardrailIds?: string[];
+  status?: 'active' | 'inactive';
 }
 
 // Create a new agent
@@ -71,7 +72,11 @@ export const createAgent = async (userId: string, input: CreateAgentInput) => {
     },
   });
 
-  return agent;
+  return {
+    ...agent,
+    knowledgeBase: agent.knowledgeBase ? JSON.parse(agent.knowledgeBase) : [],
+    status: agent.isActive ? 'active' : 'inactive',
+  };
 };
 
 // Get agent by ID
@@ -102,6 +107,7 @@ export const getAgent = async (agentId: string, userId: string) => {
     ...agent,
     knowledgeBase: agent.knowledgeBase ? JSON.parse(agent.knowledgeBase) : [],
     guardrails: agent.guardrails.map(ag => ag.guardrail),
+    status: agent.isActive ? 'active' : 'inactive',
   };
 };
 
@@ -124,6 +130,7 @@ export const getUserAgents = async (userId: string) => {
     ...agent,
     knowledgeBase: agent.knowledgeBase ? JSON.parse(agent.knowledgeBase) : [],
     sessionsCount: agent._count.sessions,
+    status: agent.isActive ? 'active' : 'inactive',
   }));
 };
 
@@ -146,7 +153,7 @@ export const updateAgent = async (
     throw new ForbiddenError('Not authorized to modify this agent');
   }
 
-  const { guardrailIds, knowledgeBase, ...updateData } = input;
+  const { guardrailIds, knowledgeBase, status, ...updateData } = input;
 
   // Update agent
   const updatedAgent = await prisma.agent.update({
@@ -154,6 +161,7 @@ export const updateAgent = async (
     data: {
       ...updateData,
       knowledgeBase: knowledgeBase ? JSON.stringify(knowledgeBase) : undefined,
+      isActive: status ? status === 'active' : undefined,
     },
     include: {
       model: {
@@ -180,7 +188,11 @@ export const updateAgent = async (
     }
   }
 
-  return updatedAgent;
+  return {
+    ...updatedAgent,
+    knowledgeBase: updatedAgent.knowledgeBase ? JSON.parse(updatedAgent.knowledgeBase) : [],
+    status: updatedAgent.isActive ? 'active' : 'inactive',
+  };
 };
 
 // Delete agent (soft delete)

@@ -29,8 +29,8 @@ interface ScoreResult {
     suggestion: string;
   };
   comparison: {
-    weakExample: string;
-    strongExample: string;
+    weakExample: { prompt: string; issue: string };
+    strongExample: { prompt: string; why: string };
   };
 }
 
@@ -290,8 +290,14 @@ const generateComparison = (prompt: string): ScoreResult['comparison'] => {
   const words = prompt.split(/\s+/).slice(0, 5).join(' ');
   
   return {
-    weakExample: `"Tell me about ${words}..."`,
-    strongExample: `"I'm working on [specific project]. Can you explain ${words} in detail, specifically focusing on [aspect]? Please provide examples and format the response as a bullet list."`,
+    weakExample: {
+      prompt: `Tell me about ${words}...`,
+      issue: "Too vague, lacks context and specific requirements"
+    },
+    strongExample: {
+      prompt: `I'm working on [specific project]. Can you explain ${words} in detail, specifically focusing on [aspect]? Please provide examples and format the response as a bullet list.`,
+      why: "Provides context, specifics, and output format"
+    },
   };
 };
 

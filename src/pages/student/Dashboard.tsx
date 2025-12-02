@@ -15,11 +15,26 @@ import { Separator } from "@/components/ui/separator";
 import { Switch } from "@/components/ui/switch";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { Skeleton } from "@/components/ui/skeleton";
 import SkyToggle from "@/components/ui/sky-toggle";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { useTheme } from "@/contexts/ThemeContext";
+import { useAuth } from "@/contexts/AuthContext";
 import { useUser } from "@/contexts/UserContext";
 import { useToast } from "@/hooks/use-toast";
+import { 
+  useDashboardStats, 
+  useRecentSessions, 
+  useAgents, 
+  useCreateAgent,
+  useUpdateAgent,
+  useDeleteAgent,
+  useArtifacts,
+  useDeleteArtifact,
+  useLeaderboard,
+  useModels,
+  useGuardrails
+} from "@/hooks/useStudentData";
 import { 
   ArrowLeft, MessageSquare, TrendingUp, Trophy, BookOpen, FileText, Settings, 
   CheckCircle, Clock, AlertCircle, Plus, Bot, Image as ImageIcon, Code, 
@@ -27,41 +42,101 @@ import {
   Zap, Activity, Target, Award, Bell, Brain, ChevronRight, Flame, 
   GraduationCap, LayoutGrid, Upload, X, FileUp, Shield, Search,
   ArrowUpRight, Layers, User, LogOut, Cpu, Lock, Unlock, Info, Volume2,
-  ChevronLeft, CreditCard, Check
+  ChevronLeft, CreditCard, Check, Loader2
 } from "lucide-react";
-import { mockAIModels, mockEnrolledCourses, mockAssignments, mockGuardrails } from "@/lib/mockData";
+import { mockEnrolledCourses, mockAssignments, mockGuardrails } from "@/lib/mockData";
 
 const StudentDashboard = () => {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const { isDark, toggleTheme } = useTheme();
   const { toast } = useToast();
+  const { user, logout, isAuthenticated } = useAuth();
+  
+  // Keep UserContext for local-only features (notifications UI state)
   const { 
-    userName, 
-    userProfile,
-    stats, 
-    sessions,
-    artifacts, 
     notifications, 
     markNotificationRead, 
     markAllNotificationsRead,
-    deleteArtifact,
-    getCourseLeaderboard,
-    getInstitutionalLeaderboard,
-    agents,
-    createAgent,
-    updateAgent,
-    deleteAgent,
     clearUserData,
-    getModelSessions,
-    getAgentSessions
   } = useUser();
+
+  // Backend API data via React Query
+  const { data: dashboardData, isLoading: isDashboardLoading } = useDashboardStats();
+  const { data: recentSessions = [], isLoading: isSessionsLoading } = useRecentSessions(10);
+  const { data: agentsData = [], isLoading: isAgentsLoading } = useAgents();
+  const { data: artifactsData, isLoading: isArtifactsLoading } = useArtifacts();
+  const { data: modelsData = [], isLoading: isModelsLoading } = useModels();
+  const { data: guardrailsData = [] } = useGuardrails();
+  
+  // Leaderboard data
+  const [leaderboardView, setLeaderboardView] = useState<"institutional" | "course">("institutional");
+  const [selectedCourse, setSelectedCourse] = useState<string>("all");
+  const { data: leaderboardData, isLoading: isLeaderboardLoading } = useLeaderboard(
+    leaderboardView, 
+    leaderboardView === 'course' && selectedCourse !== 'all' ? selectedCourse : undefined
+  );
+
+  // Mutations
+  const createAgentMutation = useCreateAgent();
+  const updateAgentMutation = useUpdateAgent();
+  const deleteAgentMutation = useDeleteAgent();
+  const deleteArtifactMutation = useDeleteArtifact();
+
+  // Redirect to login if not authenticated
+  useEffect(() => {
+    if (!isAuthenticated) {
+      navigate('/student/signin');
+    }
+  }, [isAuthenticated, navigate]);
+
+  // Derived data from API responses
+  const userName = user?.name || dashboardData?.user?.name || 'Student';
+  
+  // Find user's rank from leaderboard data
+  const userRankInLeaderboard = leaderboardData?.leaderboard?.find(entry => entry.id === user?.id)?.rank;
+  
+  const stats = {
+    tokenBalance: dashboardData?.tokens?.remaining || 0,
+    tokenQuota: dashboardData?.tokens?.quota || 50000,
+    totalTokensUsed: dashboardData?.tokens?.used || 0,
+    totalSessions: dashboardData?.stats?.sessions || 0,
+    todayModelSessions: recentSessions.filter(s => {
+      const today = new Date().toDateString();
+      return new Date(s.createdAt).toDateString() === today && !s.agentId;
+    }).length,
+    totalAgentsCreated: agentsData.length,
+    weeklyPrompts: dashboardData?.stats?.prompts || 0,
+    totalPrompts: dashboardData?.stats?.prompts || 0,
+    avgPromptScore: dashboardData?.stats?.avgScore || 0,
+    currentStreak: 0, // TODO: Add to backend
+    courseRank: userRankInLeaderboard || 0,
+    institutionalRank: userRankInLeaderboard || 0,
+    totalInCourse: leaderboardData?.leaderboard?.length || 0,
+    totalInInstitution: leaderboardData?.leaderboard?.length || 0,
+    // Calculate active days from recent sessions
+    activeDays: recentSessions.map(s => s.createdAt),
+  };
+  const sessions = recentSessions;
+  const agents = agentsData;
+  const artifacts = artifactsData?.data || [];
+  const models = modelsData;
+
+  // Filter sessions by type
+  const getModelSessions = () => sessions.filter(s => !s.agentId);
+  const getAgentSessions = (agentId: string) => sessions.filter(s => s.agentId === agentId);
+
+  // Leaderboard helpers  
+  const getCourseLeaderboard = () => leaderboardData?.leaderboard || [];
+  const getInstitutionalLeaderboard = () => leaderboardData?.leaderboard || [];
+
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const editFileInputRef = useRef<HTMLInputElement>(null);
   
   const [selectedArtifactType, setSelectedArtifactType] = useState<"all" | "image" | "code" | "document">("all");
   const [isCreateAgentOpen, setIsCreateAgentOpen] = useState(false);
   const [isEditAgentOpen, setIsEditAgentOpen] = useState(false);
-  const [editingAgent, setEditingAgent] = useState<typeof agents[0] | null>(null);
+  const [editingAgent, setEditingAgent] = useState<any>(null);
   const [isCreateGuardrailOpen, setIsCreateGuardrailOpen] = useState(false);
   const [activeTab, setActiveTab] = useState(searchParams.get('tab') || 'overview');
   const [selectedModelCategory, setSelectedModelCategory] = useState<"text" | "image" | "audio" | "video" | "other">(
@@ -75,6 +150,9 @@ const StudentDashboard = () => {
     if (tab) setActiveTab(tab);
     if (category) setSelectedModelCategory(category as any);
   }, [searchParams]);
+  
+  // Model search state
+  const [modelSearchQuery, setModelSearchQuery] = useState("");
   
   // Create Agent Form State
   const [agentName, setAgentName] = useState("");
@@ -92,10 +170,6 @@ const StudentDashboard = () => {
   const [customGuardrailInstruction, setCustomGuardrailInstruction] = useState("");
   const [customGuardrailPriority, setCustomGuardrailPriority] = useState(5);
   const [customGuardrails, setCustomGuardrails] = useState<Array<{ id: string; type: string; title: string; appliesTo: string; instruction: string; priority: number }>>([]);
-  
-  // Leaderboard State
-  const [leaderboardView, setLeaderboardView] = useState<"institutional" | "course">("institutional");
-  const [selectedCourse, setSelectedCourse] = useState<string>("all");
 
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files;
@@ -125,6 +199,42 @@ const StudentDashboard = () => {
     setKnowledgeBaseFiles(knowledgeBaseFiles.filter((_, i) => i !== index));
   };
 
+  // Handle file upload for editing agent KB
+  const handleEditFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files;
+    if (!files || !editingAgent) return;
+    
+    const currentFiles = editingAgent.knowledgeBase || [];
+    const currentSize = editingAgent.knowledgeBaseSize || 0;
+    const newFileNames: string[] = [];
+    let totalSize = currentSize;
+    
+    for (let i = 0; i < files.length; i++) {
+      const file = files[i];
+      if (totalSize + file.size > 10 * 1024 * 1024) {
+        toast({
+          title: "File size limit exceeded",
+          description: "Total knowledge base size cannot exceed 10MB",
+          variant: "destructive",
+        });
+        break;
+      }
+      newFileNames.push(file.name);
+      totalSize += file.size;
+    }
+    
+    setEditingAgent({
+      ...editingAgent, 
+      knowledgeBase: [...currentFiles, ...newFileNames],
+      knowledgeBaseSize: totalSize
+    });
+    
+    // Reset input
+    if (editFileInputRef.current) {
+      editFileInputRef.current.value = '';
+    }
+  };
+
   const handleAddCustomGuardrail = () => {
     if (!customGuardrailTitle || !customGuardrailInstruction) return;
     
@@ -152,7 +262,7 @@ const StudentDashboard = () => {
     });
   };
 
-  const handleCreateAgent = () => {
+  const handleCreateAgent = async () => {
     if (!agentName || !agentModel) {
       toast({
         title: "Missing required fields",
@@ -162,64 +272,46 @@ const StudentDashboard = () => {
       return;
     }
     
-    // Get the model name
-    const selectedModelData = mockAIModels.find(m => m.id === agentModel);
+    // Get the model name from the backend models data
+    const selectedModelData = models.find(m => m.id === agentModel);
     const modelName = selectedModelData?.name || agentModel;
     
-    // Prepare guardrails
-    const agentGuardrails = [
-      // Selected existing guardrails
-      ...selectedGuardrails.map(gId => {
-        const g = mockGuardrails.find(gr => gr.id === gId);
-        return {
-          id: gId,
-          type: (g?.type || 'custom') as 'educational-integrity' | 'content-safety' | 'behavioral' | 'custom',
-          title: g?.title || '',
-          appliesTo: (g?.appliesTo || 'both') as 'prompt' | 'response' | 'both',
-          instruction: g?.instruction || '',
-          priority: g?.priority || 5,
-        };
-      }),
-      // Custom guardrails
-      ...customGuardrails.map(cg => ({
-        id: `custom-${Date.now()}-${Math.random()}`,
-        type: cg.type as 'educational-integrity' | 'content-safety' | 'behavioral' | 'custom',
-        title: cg.title,
-        appliesTo: cg.appliesTo as 'prompt' | 'response' | 'both',
-        instruction: cg.instruction,
-        priority: cg.priority,
-      })),
-    ];
+    // Prepare guardrail IDs for the backend
+    const guardrailIds = selectedGuardrails.filter(id => !id.startsWith('custom-'));
     
-    // Create the agent
-    createAgent({
-      name: agentName,
-      description: agentDescription,
-      modelId: agentModel,
-      modelName,
-      guardrails: agentGuardrails,
-      behaviorPrompt,
-      strictMode,
-      knowledgeBaseFiles: knowledgeBaseFiles.map(f => f.name),
-      knowledgeBaseSize: knowledgeBaseFiles.reduce((acc, f) => acc + f.size, 0),
-      status: 'active',
-    });
-    
-    toast({
-      title: "Agent created successfully!",
-      description: `${agentName} is ready to use`,
-    });
-    
-    // Reset form
-    setAgentName("");
-    setAgentDescription("");
-    setAgentModel("");
-    setSelectedGuardrails([]);
-    setBehaviorPrompt("");
-    setStrictMode(false);
-    setKnowledgeBaseFiles([]);
-    setCustomGuardrails([]);
-    setIsCreateAgentOpen(false);
+    try {
+      await createAgentMutation.mutateAsync({
+        name: agentName,
+        description: agentDescription,
+        modelId: agentModel,
+        behaviorPrompt,
+        strictMode,
+        knowledgeBase: knowledgeBaseFiles.map(f => f.name),
+        guardrailIds,
+      });
+      
+      toast({
+        title: "Agent created successfully!",
+        description: `${agentName} is ready to use`,
+      });
+      
+      // Reset form
+      setAgentName("");
+      setAgentDescription("");
+      setAgentModel("");
+      setSelectedGuardrails([]);
+      setBehaviorPrompt("");
+      setStrictMode(false);
+      setKnowledgeBaseFiles([]);
+      setCustomGuardrails([]);
+      setIsCreateAgentOpen(false);
+    } catch (error: any) {
+      toast({
+        title: "Failed to create agent",
+        description: error.message || "Please try again",
+        variant: "destructive",
+      });
+    }
   };
 
   const toggleGuardrail = (guardrailId: string) => {
@@ -242,7 +334,31 @@ const StudentDashboard = () => {
     ? artifacts 
     : artifacts.filter(a => a.type === selectedArtifactType);
 
-  const modelsByCategory = mockAIModels.filter(m => m.category === selectedModelCategory);
+  // Map backend models to frontend display format with search filtering
+  const modelsByCategory = models
+    .filter(m => m.category === selectedModelCategory)
+    .filter(m => {
+      if (!modelSearchQuery.trim()) return true;
+      const query = modelSearchQuery.toLowerCase();
+      return (
+        m.name.toLowerCase().includes(query) ||
+        m.provider.toLowerCase().includes(query) ||
+        (m.description || '').toLowerCase().includes(query)
+      );
+    })
+    .map(m => ({
+      id: m.id,
+      name: m.name,
+      provider: m.provider,
+      description: m.description || '',
+      category: m.category,
+      enabled: m.isActive ?? true,
+      features: [] as string[], // Backend doesn't provide features yet
+      tokensPerRequest: m.inputCost || 1.0
+    }));
+  
+  // Enabled models for agent creation dropdowns
+  const enabledModels = models.filter(m => m.isActive);
   
   // Count unread notifications
   const unreadNotifications = notifications.filter(n => !n.read).length;
@@ -571,37 +687,37 @@ const StudentDashboard = () => {
                         <CardContent className="p-5">
                           <div className="flex items-start gap-4">
                             <div className={`w-12 h-12 rounded-2xl flex items-center justify-center flex-shrink-0 group-hover:scale-110 transition-transform ${
-                              session.modelCategory === 'image' ? 'gradient-accent glow-accent' :
-                              session.modelCategory === 'audio' ? 'gradient-success' :
+                              session.model?.category === 'image' ? 'gradient-accent glow-accent' :
+                              session.model?.category === 'audio' ? 'gradient-success' :
                               idx % 2 === 0 ? 'gradient-primary glow-primary' :
                               'gradient-secondary glow-secondary'
                             }`}>
-                              {session.modelCategory === 'image' ? <ImageIcon className="w-6 h-6 text-white" /> :
-                               session.modelCategory === 'audio' ? <Volume2 className="w-6 h-6 text-white" /> :
+                              {session.model?.category === 'image' ? <ImageIcon className="w-6 h-6 text-white" /> :
+                               session.model?.category === 'audio' ? <Volume2 className="w-6 h-6 text-white" /> :
                                <MessageSquare className="w-6 h-6 text-white" />}
                             </div>
                             <div className="flex-1 min-w-0">
                               <div className="flex items-start justify-between gap-4">
                                 <div>
                                   <h3 className="font-semibold text-lg group-hover:text-primary transition-colors truncate">
-                                    {session.title}
+                                    {session.title || 'Untitled Session'}
                                   </h3>
                                   <p className="text-sm text-muted-foreground mt-1">
                                     {new Date(session.updatedAt).toLocaleString()}
                                   </p>
                                 </div>
                                 <Badge className={`text-xs flex-shrink-0 ${
-                                  session.modelCategory === 'image' ? 'gradient-accent' :
-                                  session.modelCategory === 'audio' ? 'gradient-success' :
+                                  session.model?.category === 'image' ? 'gradient-accent' :
+                                  session.model?.category === 'audio' ? 'gradient-success' :
                                   'gradient-primary'
                                 }`}>
-                                  {session.modelName}
+                                  {session.model?.name || 'Unknown'}
                                 </Badge>
                               </div>
                               <div className="flex items-center gap-4 mt-4">
                                 <div className="flex items-center gap-1.5 text-sm text-muted-foreground">
                                   <MessageSquare className="w-4 h-4 text-blue-400" />
-                                  <span>{session.messageCount} prompts</span>
+                                  <span>{session.promptCount} prompts</span>
                                 </div>
                                 <div className="flex items-center gap-1.5 text-sm text-muted-foreground">
                                   <Zap className="w-4 h-4 text-cyan-400" />
@@ -808,7 +924,7 @@ const StudentDashboard = () => {
                     {getCourseLeaderboard().slice(0, 3).map((entry, idx) => (
                       <div 
                         key={entry.rank}
-                        className={`flex items-center gap-3 p-3 rounded-xl glass ${entry.isCurrentUser ? 'border border-primary/50' : ''}`}
+                        className={`flex items-center gap-3 p-3 rounded-xl glass ${user?.id === entry.id ? 'border border-primary/50' : ''}`}
                       >
                         <div className={`w-8 h-8 rounded-lg flex items-center justify-center font-bold text-sm ${
                           entry.rank === 1 ? 'bg-gradient-to-br from-amber-400 to-amber-600 text-white' :
@@ -820,7 +936,7 @@ const StudentDashboard = () => {
                       </div>
                         <div className="flex-1 min-w-0">
                           <div className="font-medium text-sm truncate">{entry.name}</div>
-                          <div className="text-xs text-muted-foreground">{entry.totalSessions} sessions • {entry.totalPrompts} prompts</div>
+                          <div className="text-xs text-muted-foreground">{entry.sessions} sessions • {entry.tokensUsed} tokens</div>
                         </div>
                         <Badge variant="outline" className="text-xs text-emerald-400 border-emerald-500/30">
                           {entry.avgScore}%
@@ -850,7 +966,13 @@ const StudentDashboard = () => {
                   <div className="flex items-center gap-2">
                     <div className="glass rounded-xl px-4 py-2 flex items-center gap-2">
                       <Search className="w-4 h-4 text-muted-foreground" />
-                      <input type="text" placeholder="Search models..." className="bg-transparent border-none outline-none text-sm w-40" />
+                      <input 
+                        type="text" 
+                        placeholder="Search models..." 
+                        className="bg-transparent border-none outline-none text-sm w-40" 
+                        value={modelSearchQuery}
+                        onChange={(e) => setModelSearchQuery(e.target.value)}
+                      />
                     </div>
                   </div>
                 </div>
@@ -1011,7 +1133,7 @@ const StudentDashboard = () => {
                               <SelectValue placeholder="Select a model" />
                             </SelectTrigger>
                             <SelectContent>
-                                    {mockAIModels.filter(m => m.enabled).map(m => (
+                                    {enabledModels.map(m => (
                                       <SelectItem key={m.id} value={m.id}>
                                         <div className="flex items-center gap-2">
                                           <span>{m.name}</span>
@@ -1318,18 +1440,14 @@ Example: You are a friendly Python tutor. Explain concepts step-by-step with cod
                         style={{ animationDelay: `${idx * 0.1}s` }}
                       >
                         <CardContent className="p-5 space-y-4">
-                          {/* Header with name and status */}
+                          {/* Header with name */}
                           <div className="flex items-start justify-between gap-3">
                             <div className="flex items-center gap-3">
                               <Bot className="w-5 h-5 text-muted-foreground" />
                               <h3 className="font-semibold text-lg">{agent.name}</h3>
                             </div>
-                            <Badge className={`text-xs ${
-                              agent.status === 'active' 
-                                ? 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30' 
-                                : 'bg-orange-500/20 text-orange-400 border-orange-500/30'
-                            }`}>
-                              {agent.status}
+                            <Badge className="text-xs bg-emerald-500/20 text-emerald-400 border-emerald-500/30">
+                              Active
                             </Badge>
                           </div>
 
@@ -1339,12 +1457,12 @@ Example: You are a friendly Python tutor. Explain concepts step-by-step with cod
                           {/* Model Badge */}
                           <div className="flex items-center gap-2">
                             <Badge variant="outline" className="text-xs">
-                              {agent.modelName}
+                              {agent.model?.name || 'Unknown Model'}
                             </Badge>
-                            {agent.knowledgeBaseFiles.length > 0 && (
+                            {agent.knowledgeBase && agent.knowledgeBase.length > 0 && (
                               <Badge variant="outline" className="text-xs">
                                 <FileText className="w-3 h-3 mr-1" />
-                                {agent.knowledgeBaseFiles.length} files
+                                {agent.knowledgeBase.length} files
                               </Badge>
                             )}
                           </div>
@@ -1365,11 +1483,6 @@ Example: You are a friendly Python tutor. Explain concepts step-by-step with cod
                               <MessageSquare className="w-4 h-4 text-blue-400" />
                               <span className="text-sm font-medium">{agent.messagesCount}</span>
                               <span className="text-xs text-muted-foreground">Messages</span>
-                            </div>
-                            <div className="flex items-center gap-2">
-                              <FileText className="w-4 h-4 text-pink-400" />
-                              <span className="text-sm font-medium">{agent.artifactsCount}</span>
-                              <span className="text-xs text-muted-foreground">Artifacts</span>
                             </div>
                           </div>
 
@@ -1400,9 +1513,22 @@ Example: You are a friendly Python tutor. Explain concepts step-by-step with cod
                               variant="outline" 
                               size="sm" 
                               className="glass text-red-400 hover:text-red-400 hover:bg-red-500/10"
-                              onClick={() => {
+                              disabled={deleteAgentMutation.isPending}
+                              onClick={async () => {
                                 if (confirm(`Are you sure you want to delete "${agent.name}"?`)) {
-                                  deleteAgent(agent.id);
+                                  try {
+                                    await deleteAgentMutation.mutateAsync(agent.id);
+                                    toast({
+                                      title: "Agent deleted",
+                                      description: `${agent.name} has been deleted.`,
+                                    });
+                                  } catch (error: any) {
+                                    toast({
+                                      title: "Failed to delete agent",
+                                      description: error.message,
+                                      variant: "destructive",
+                                    });
+                                  }
                                 }
                               }}
                             >
@@ -1502,7 +1628,7 @@ Example: You are a friendly Python tutor. Explain concepts step-by-step with cod
                     <div 
                       key={entry.rank} 
                       className={`glass p-5 rounded-2xl card-hover animate-scale-in ${
-                        entry.isCurrentUser ? 'border border-primary/50 bg-primary/5' : ''
+                        user?.id === entry.id ? 'border border-primary/50 bg-primary/5' : ''
                       }`}
                       style={{ animationDelay: `${idx * 0.1}s` }}
                     >
@@ -1518,16 +1644,14 @@ Example: You are a friendly Python tutor. Explain concepts step-by-step with cod
                         <div className="flex-1">
                           <div className="flex items-center gap-2">
                             <p className="font-semibold text-lg">{entry.name}</p>
-                            {entry.isCurrentUser && (
+                            {user?.id === entry.id && (
                               <Badge className="gradient-primary text-xs">You</Badge>
                             )}
                         </div>
                           <div className="flex items-center gap-4 mt-1 text-sm text-muted-foreground">
-                            <span>{entry.totalSessions} sessions</span>
+                            <span>{entry.sessions} sessions</span>
                             <span>•</span>
                             <span>{entry.tokensUsed.toLocaleString()} tokens</span>
-                            <span>•</span>
-                            <span className="text-cyan-400">{entry.totalPrompts} prompts</span>
                       </div>
                         </div>
                         <div className="text-right">
@@ -1613,7 +1737,7 @@ Example: You are a friendly Python tutor. Explain concepts step-by-step with cod
                                <FileText className="w-5 h-5 text-white" />}
                             </div>
                             <div className="flex-1 min-w-0">
-                              <CardTitle className="text-base truncate">{artifact.title}</CardTitle>
+                              <CardTitle className="text-base truncate">{artifact.title || 'Untitled'}</CardTitle>
                               <p className="text-xs text-muted-foreground mt-1">
                                 {new Date(artifact.createdAt).toLocaleDateString()}
                               </p>
@@ -1622,7 +1746,7 @@ Example: You are a friendly Python tutor. Explain concepts step-by-step with cod
                         </CardHeader>
                         <CardContent>
                           <div className="flex items-center gap-2 mb-3">
-                            <Badge variant="outline" className="text-xs">{artifact.modelName}</Badge>
+                            <Badge variant="outline" className="text-xs">{artifact.session?.model?.name || 'Unknown'}</Badge>
                             <Badge variant="outline" className="text-xs capitalize">{artifact.type}</Badge>
                           </div>
                           <div className="flex gap-2">
@@ -1634,7 +1758,7 @@ Example: You are a friendly Python tutor. Explain concepts step-by-step with cod
                               size="sm" 
                               variant="outline" 
                               className="glass text-red-400 hover:text-red-400 hover:bg-red-500/10"
-                              onClick={() => deleteArtifact(artifact.id)}
+                              onClick={() => deleteArtifactMutation.mutate(artifact.id)}
                             >
                               <Trash2 className="w-4 h-4" />
                             </Button>
@@ -1807,7 +1931,7 @@ Example: You are a friendly Python tutor. Explain concepts step-by-step with cod
                           <SelectValue placeholder="Select a model" />
                         </SelectTrigger>
                         <SelectContent>
-                          {mockAIModels.filter(m => m.enabled).map(m => (
+                          {enabledModels.map(m => (
                             <SelectItem key={m.id} value={m.id}>
                               <div className="flex items-center gap-2">
                                 <span>{m.name}</span>
@@ -1983,53 +2107,64 @@ Example: You are a friendly Python tutor. Explain concepts step-by-step with cod
                   />
                 </div>
                 
-                <div className="flex items-center justify-between p-3 rounded-xl glass">
-                  <div>
-                    <Label>Status</Label>
-                    <p className="text-xs text-muted-foreground">
-                      {editingAgent.status === 'active' ? 'Agent is active and can be used' : 'Agent is in draft mode'}
-                    </p>
-                  </div>
-                  <Badge className={editingAgent.status === 'active' ? 'bg-emerald-500/20 text-emerald-400' : 'bg-orange-500/20 text-orange-400'}>
-                    {editingAgent.status}
-                  </Badge>
-                </div>
-                
-                <div className="flex items-center gap-2">
-                  <Button
-                    variant="outline"
-                    className="flex-1 glass"
-                    onClick={() => {
-                      setEditingAgent({...editingAgent, status: editingAgent.status === 'active' ? 'draft' : 'active'});
-                    }}
-                  >
-                    {editingAgent.status === 'active' ? 'Deactivate' : 'Activate'}
-                  </Button>
-                </div>
-                
-                {/* KB Info (read-only) */}
-                {editingAgent.knowledgeBaseFiles.length > 0 && (
-                  <div className="p-3 rounded-xl glass">
+                {/* Knowledge Base - Editable */}
+                <div className="p-3 rounded-xl glass space-y-3">
+                  <div className="flex items-center justify-between">
                     <Label className="text-xs text-muted-foreground">Knowledge Base Files</Label>
-                    <div className="mt-2 space-y-1">
-                      {editingAgent.knowledgeBaseFiles.map((file, idx) => (
-                        <div key={idx} className="flex items-center gap-2 text-xs">
-                          <FileText className="w-3 h-3 text-muted-foreground" />
-                          <span>{file}</span>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="h-7 text-xs"
+                      onClick={() => editFileInputRef.current?.click()}
+                    >
+                      <Upload className="w-3 h-3 mr-1" />
+                      Add Files
+                    </Button>
+                    <input
+                      type="file"
+                      ref={editFileInputRef}
+                      onChange={handleEditFileUpload}
+                      className="hidden"
+                      multiple
+                      accept=".pdf,.txt,.md,.json"
+                    />
+                  </div>
+                  {(editingAgent.knowledgeBase || []).length > 0 ? (
+                    <div className="space-y-1">
+                      {(editingAgent.knowledgeBase || []).map((file, idx) => (
+                        <div key={idx} className="flex items-center justify-between gap-2 p-2 rounded-lg bg-white/5 group">
+                          <div className="flex items-center gap-2 text-xs">
+                            <FileText className="w-3 h-3 text-muted-foreground" />
+                            <span className="truncate max-w-[180px]">{file}</span>
+                          </div>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-6 w-6 opacity-0 group-hover:opacity-100 hover:bg-red-500/20 text-red-400"
+                            onClick={() => {
+                              const newFiles = (editingAgent.knowledgeBase || []).filter((_, i) => i !== idx);
+                              setEditingAgent({...editingAgent, knowledgeBase: newFiles});
+                            }}
+                          >
+                            <X className="w-3 h-3" />
+                          </Button>
                         </div>
                       ))}
                     </div>
-                  </div>
-                )}
+                  ) : (
+                    <p className="text-xs text-muted-foreground text-center py-2">No files uploaded</p>
+                  )}
+                  <p className="text-[10px] text-muted-foreground">Max 10MB total. Supported: PDF, TXT, MD, JSON</p>
+                </div>
                 
                 {/* Guardrails Info (read-only) */}
-                {editingAgent.guardrails.length > 0 && (
+                {(editingAgent.guardrails || []).length > 0 && (
                   <div className="p-3 rounded-xl glass">
-                    <Label className="text-xs text-muted-foreground">Guardrails ({editingAgent.guardrails.length})</Label>
+                    <Label className="text-xs text-muted-foreground">Guardrails ({(editingAgent.guardrails || []).length})</Label>
                     <div className="mt-2 space-y-1">
-                      {editingAgent.guardrails.map((g, idx) => (
+                      {(editingAgent.guardrails || []).map((g, idx) => (
                         <Badge key={idx} variant="outline" className="text-[10px] mr-1">
-                          {g.title}
+                          {g.title || g.name || g}
                         </Badge>
                       ))}
                     </div>
@@ -2044,21 +2179,34 @@ Example: You are a friendly Python tutor. Explain concepts step-by-step with cod
               </Button>
               <Button 
                 className="gradient-accent glow-accent"
-                onClick={() => {
+                disabled={updateAgentMutation.isPending}
+                onClick={async () => {
                   if (editingAgent) {
-                    updateAgent(editingAgent.id, {
-                      name: editingAgent.name,
-                      description: editingAgent.description,
-                      behaviorPrompt: editingAgent.behaviorPrompt,
-                      strictMode: editingAgent.strictMode,
-                      status: editingAgent.status,
-                    });
-                    toast({
-                      title: "Agent updated",
-                      description: `${editingAgent.name} has been updated successfully.`,
-                    });
-                    setIsEditAgentOpen(false);
-                    setEditingAgent(null);
+                    try {
+                      await updateAgentMutation.mutateAsync({
+                        id: editingAgent.id,
+                        data: {
+                          name: editingAgent.name,
+                          description: editingAgent.description,
+                          behaviorPrompt: editingAgent.behaviorPrompt,
+                          strictMode: editingAgent.strictMode,
+                          knowledgeBase: editingAgent.knowledgeBase,
+                          status: editingAgent.status,
+                        }
+                      });
+                      toast({
+                        title: "Agent updated",
+                        description: `${editingAgent.name} has been updated successfully.`,
+                      });
+                      setIsEditAgentOpen(false);
+                      setEditingAgent(null);
+                    } catch (error: any) {
+                      toast({
+                        title: "Failed to update agent",
+                        description: error.message,
+                        variant: "destructive",
+                      });
+                    }
                   }
                 }}
               >

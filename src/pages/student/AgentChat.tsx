@@ -1,102 +1,161 @@
 import { Button } from "@/components/ui/button";
-import { Card, CardContent } from "@/components/ui/card";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
 import SkyToggle from "@/components/ui/sky-toggle";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { useTheme } from "@/contexts/ThemeContext";
-import { useUser, ChatMessage, AIAgent } from "@/contexts/UserContext";
+import { 
+  useAgent, 
+  useAgentSessions, 
+  useCreateSession, 
+  useSession, 
+  useSendMessage,
+  useDashboardStats
+} from "@/hooks/useStudentData";
+import { Message, Session } from "@/lib/api";
 import { 
   ArrowLeft, Send, Plus, MessageSquare, EyeOff, Bot, 
-  Sparkles, Zap, Code, Target, TrendingUp, AlertTriangle,
-  Copy, ThumbsUp, ThumbsDown, RefreshCw, PanelRightClose,
-  PanelRight, Loader2, CheckCircle, Info, FileText, Shield
+  Zap, Target, TrendingUp, AlertTriangle,
+  Copy, ThumbsUp, ThumbsDown,
+  PanelRightClose, PanelRight, Loader2, CheckCircle, FileText
 } from "lucide-react";
 import { useState, useEffect, useRef } from "react";
 import { calculateRequestCost } from "@/lib/modelPricing";
+import { useToast } from "@/hooks/use-toast";
+
+// Local message type for UI state
+interface ChatMessage {
+  id: string;
+  role: 'user' | 'assistant';
+  content: string;
+  timestamp: string;
+  score?: number;
+  scoreBreakdown?: {
+    clarity: number;
+    specificity: number;
+    context: number;
+    relevance: number;
+  };
+  tokensUsed?: number;
+  blocked?: boolean;
+  blockReason?: string;
+  feedback?: {
+    strengths: string[];
+    biggestGap: string;
+    weakExample: { prompt: string; issue: string };
+    strongExample: { prompt: string; why: string };
+    guidingQuestions: string[];
+    whatToTryNext: string[];
+  };
+}
 
 const AgentChat = () => {
   const navigate = useNavigate();
   const { agentId } = useParams();
-  const [searchParams] = useSearchParams();
+  const [searchParams, setSearchParams] = useSearchParams();
   const { isDark, toggleTheme } = useTheme();
-  const { 
-    stats, 
-    agents,
-    getAgent,
-    createAgentSession,
-    getSession,
-    addMessageToSession,
-    getAgentSessions,
-    artifacts,
-    refreshStats
-  } = useUser();
+  const { toast } = useToast();
   const messagesEndRef = useRef<HTMLDivElement>(null);
   
-  // Get the agent
-  const agent = agentId ? getAgent(agentId) : undefined;
-  
-  // Check if we're opening an existing session
+  // Get session ID from URL
   const sessionIdFromUrl = searchParams.get('session');
   const [currentSessionId, setCurrentSessionId] = useState<string | null>(sessionIdFromUrl);
+  const sessionCreatedRef = useRef(false);
   
-  // Get or create session
-  useEffect(() => {
-    if (!agent) return;
-    
-    if (sessionIdFromUrl) {
-      // Load existing session
-      setCurrentSessionId(sessionIdFromUrl);
-    } else if (!currentSessionId) {
-      // Create new session
-      const newSession = createAgentSession(agent.id);
-      if (newSession) {
-        setCurrentSessionId(newSession.id);
-      }
-    }
-  }, [agent, sessionIdFromUrl]);
+  // Backend API hooks
+  const { data: agent, isLoading: agentLoading, error: agentError } = useAgent(agentId || '');
+  const { data: agentSessions = [], refetch: refetchSessions } = useAgentSessions(agentId || '');
+  const { data: currentSession, refetch: refetchCurrentSession } = useSession(currentSessionId || '');
+  const { data: stats } = useDashboardStats();
+  const createSessionMutation = useCreateSession();
+  const sendMessageMutation = useSendMessage();
+  
+  // Local UI state
+  const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const [inputMessage, setInputMessage] = useState("");
+  const [showArtifacts, setShowArtifacts] = useState(true);
+  const [isTyping, setIsTyping] = useState(false);
   
   // Get welcome message
   const getWelcomeMessage = (): ChatMessage => ({
     id: "welcome-1",
     role: "assistant",
     content: agent 
-      ? `Hello! I'm **${agent.name}**, powered by ${agent.modelName}.\n\n${agent.description || "I'm here to help you with your questions."}\n\n${agent.knowledgeBaseFiles.length > 0 ? `📚 I have access to ${agent.knowledgeBaseFiles.length} knowledge base file(s) to help answer your questions.\n\n` : ''}How can I assist you today?`
+      ? `Hello! I'm **${agent.name}**, powered by ${agent.model.name}.\n\n${agent.description || "I'm here to help you with your questions."}\n\n${(agent.knowledgeBase?.length || 0) > 0 ? `📚 I have access to ${agent.knowledgeBase?.length || 0} knowledge base file(s) to help answer your questions.\n\n` : ''}How can I assist you today?`
       : "Hello! How can I help you?",
     timestamp: new Date().toLocaleTimeString(),
   });
   
-  // Initialize messages
-  const existingSession = currentSessionId ? getSession(currentSessionId) : null;
-  const [messages, setMessages] = useState<ChatMessage[]>(() => {
-    if (existingSession && existingSession.messages.length > 0) {
-      return existingSession.messages;
-    }
-    return [getWelcomeMessage()];
-  });
-  
-  // Load session messages when session changes
+  // Create session when agent loads and no session exists
   useEffect(() => {
-    if (currentSessionId) {
-      const session = getSession(currentSessionId);
-      if (session && session.messages.length > 0) {
-        setMessages(session.messages);
-      } else {
-        setMessages([getWelcomeMessage()]);
-      }
+    if (!agent || !agentId) return;
+    
+    if (sessionIdFromUrl) {
+      setCurrentSessionId(sessionIdFromUrl);
+      sessionCreatedRef.current = true;
+    } else if (!currentSessionId && !sessionCreatedRef.current) {
+      sessionCreatedRef.current = true;
+      // Create a new session for this agent
+      createSessionMutation.mutate(
+        { 
+          modelId: agent.modelId,
+          agentId: agent.id,
+          title: `${agent.name} Chat`
+        },
+        {
+          onSuccess: (newSession) => {
+            setCurrentSessionId(newSession.id);
+            setSearchParams({ session: newSession.id });
+            refetchSessions();
+          },
+          onError: () => {
+            toast({
+              title: "Error",
+              description: "Failed to create session",
+              variant: "destructive"
+            });
+          }
+        }
+      );
     }
-  }, [currentSessionId]);
+  }, [agent?.id, sessionIdFromUrl]);
   
-  const [inputMessage, setInputMessage] = useState("");
-  const [showArtifacts, setShowArtifacts] = useState(true);
-  const [isTyping, setIsTyping] = useState(false);
+  // Load messages from session
+  useEffect(() => {
+    if (currentSession && currentSession.messages && currentSession.messages.length > 0) {
+      const loadedMessages: ChatMessage[] = currentSession.messages.map((msg: Message) => {
+        // Parse feedback if it's a JSON string
+        let parsedFeedback = undefined;
+        if (msg.feedback) {
+          try {
+            parsedFeedback = typeof msg.feedback === 'string' ? JSON.parse(msg.feedback) : msg.feedback;
+          } catch {
+            parsedFeedback = undefined;
+          }
+        }
+        
+        return {
+          id: msg.id,
+          role: msg.role as 'user' | 'assistant',
+          content: msg.content,
+          timestamp: new Date(msg.createdAt).toLocaleTimeString(),
+          score: msg.score || undefined,
+          tokensUsed: msg.tokens,
+          feedback: parsedFeedback,
+        };
+      });
+      setMessages(loadedMessages);
+    } else if (agent) {
+      setMessages([getWelcomeMessage()]);
+    }
+  }, [currentSession?.id, agent]);
   
   // Calculate session tokens used
   const sessionTokensUsed = messages.reduce((acc, m) => acc + (m.tokensUsed || 0), 0);
   
-  // Get recent sessions for this agent
-  const agentSessions = agent ? getAgentSessions(agent.id).filter(s => s.id !== currentSessionId) : [];
+  // Filter out current session from sidebar
+  const otherSessions = agentSessions.filter((s: Session) => s.id !== currentSessionId);
   
   // Calculate session score
   const userMessages = messages.filter(m => m.role === "user" && m.score !== undefined && m.score > 0);
@@ -112,57 +171,7 @@ const AgentChat = () => {
     scrollToBottom();
   }, [messages, isTyping]);
 
-  // Score prompt (same logic as regular chat)
-  const scorePrompt = (prompt: string, previousMessages: ChatMessage[]) => {
-    const blockedWords = ["hack", "cheat", "bypass"];
-    const isBlocked = blockedWords.some(word => prompt.toLowerCase().includes(word));
-    if (isBlocked) {
-      return { 
-        score: 0, 
-        breakdown: { clarity: 0, specificity: 0, context: 0, relevance: 0 }, 
-        blocked: true, 
-        blockReason: "Your prompt contains restricted content. Please rephrase.",
-        feedback: null
-      };
-    }
-
-    const hasQuestion = prompt.includes("?");
-    const wordCount = prompt.split(" ").length;
-    const hasExample = prompt.toLowerCase().includes("example");
-    const hasContext = prompt.toLowerCase().includes("because") || prompt.toLowerCase().includes("since");
-    
-    const clarity = Math.min(100, Math.max(20, 40 + prompt.length / 3 + (hasQuestion ? 15 : 0)));
-    const specificity = Math.min(100, Math.max(20, 30 + (wordCount > 8 ? 30 : wordCount > 5 ? 20 : 10) + (hasExample ? 15 : 0)));
-    const context = Math.min(100, Math.max(20, previousMessages.length > 2 ? 70 + Math.random() * 15 : hasContext ? 60 : 40 + Math.random() * 20));
-    const relevance = Math.min(100, Math.max(20, 50 + Math.random() * 30));
-    
-    const score = Math.round((clarity + specificity + context + relevance) / 4);
-    const breakdown = { 
-      clarity: Math.round(clarity), 
-      specificity: Math.round(specificity), 
-      context: Math.round(context), 
-      relevance: Math.round(relevance) 
-    };
-
-    const strengths: string[] = [];
-    if (breakdown.clarity >= 70) strengths.push("Clear and understandable request");
-    if (breakdown.specificity >= 70) strengths.push("Good level of detail");
-    if (breakdown.context >= 70) strengths.push("Builds well on conversation context");
-    if (hasQuestion) strengths.push("Uses question format effectively");
-
-    const feedback = {
-      strengths: strengths.length > 0 ? strengths : ["You submitted a prompt - that's the first step!"],
-      biggestGap: score < 60 ? "Try adding more specific details to your prompt." : "Great job!",
-      weakExample: { prompt: "Tell me about coding", issue: "Too vague" },
-      strongExample: { prompt: "Can you explain how Python list comprehensions work?", why: "Specific and clear" },
-      guidingQuestions: ["What specific outcome do you want?", "Can you add more context?"],
-      whatToTryNext: ["Add specific examples", "Be more precise about your goal"]
-    };
-
-    return { score, breakdown, blocked: false, feedback };
-  };
-
-  const handleSendMessage = () => {
+  const handleSendMessage = async () => {
     if (!inputMessage.trim() || !agent || !currentSessionId) return;
 
     const inputTokens = Math.ceil(inputMessage.length / 4);
@@ -171,55 +180,143 @@ const AgentChat = () => {
     const responseTokenCost = calculateRequestCost(agent.modelId, 0, estimatedOutputTokens, inputMessage.length);
     const totalCost = userTokenCost + responseTokenCost;
     
-    if (stats.tokenBalance < totalCost) {
+    if (stats && stats.tokens.remaining < totalCost) {
+      toast({
+        title: "Insufficient Tokens",
+        description: "You don't have enough tokens for this request.",
+        variant: "destructive"
+      });
       return;
     }
 
-    const { score, breakdown, blocked, blockReason, feedback } = scorePrompt(inputMessage, messages);
-
-    const newUserMessage: ChatMessage = {
-      id: `msg-${Date.now()}`,
+    // Create optimistic user message
+    const tempUserMessage: ChatMessage = {
+      id: `temp-${Date.now()}`,
       role: "user",
       content: inputMessage,
       timestamp: new Date().toLocaleTimeString(),
-      score: blocked ? 0 : score,
-      scoreBreakdown: breakdown,
       tokensUsed: userTokenCost,
-      blocked,
-      blockReason,
-      feedback: feedback || undefined,
     };
 
-    const updatedMessages = [...messages, newUserMessage];
-    setMessages(updatedMessages);
+    setMessages(prev => [...prev, tempUserMessage]);
     setInputMessage("");
-    
-    // Save user message to session
-    addMessageToSession(currentSessionId, newUserMessage, userTokenCost, blocked ? undefined : score);
-
-    if (blocked) {
-      return;
-    }
-
     setIsTyping(true);
 
-    setTimeout(() => {
-      const newAssistantMessage: ChatMessage = {
-        id: `msg-${Date.now() + 1}`,
-        role: "assistant",
-        content: `Based on my knowledge base and the ${agent.modelName} model, here's my response:\n\nThis is a simulated response from the **${agent.name}** agent. In production, this would use RAG (Retrieval-Augmented Generation) to:\n\n1. Search through the uploaded knowledge base files\n2. Find relevant context\n3. Generate a response using ${agent.modelName}\n\n${agent.behaviorPrompt ? `My behavior is guided by: "${agent.behaviorPrompt}"` : ''}\n\nWould you like me to elaborate on any specific aspect?`,
-        timestamp: new Date().toLocaleTimeString(),
-        tokensUsed: responseTokenCost,
-      };
+    try {
+      const result = await sendMessageMutation.mutateAsync({
+        sessionId: currentSessionId,
+        content: inputMessage
+      });
       
-      setMessages(prev => [...prev, newAssistantMessage]);
-      addMessageToSession(currentSessionId, newAssistantMessage, responseTokenCost);
+      // Parse feedback from the response
+      let parsedFeedback = undefined;
+      if (result.userMessage.feedback) {
+        try {
+          parsedFeedback = typeof result.userMessage.feedback === 'string' 
+            ? JSON.parse(result.userMessage.feedback) 
+            : result.userMessage.feedback;
+        } catch {
+          parsedFeedback = undefined;
+        }
+      }
+      
+      // Update with actual server response
+      const actualUserMessage: ChatMessage = {
+        id: result.userMessage.id,
+        role: 'user',
+        content: result.userMessage.content,
+        timestamp: new Date(result.userMessage.createdAt).toLocaleTimeString(),
+        score: result.userMessage.scoreResult?.totalScore || result.userMessage.score || undefined,
+        scoreBreakdown: result.userMessage.scoreResult?.criteria ? {
+          clarity: result.userMessage.scoreResult.criteria.clarity,
+          specificity: result.userMessage.scoreResult.criteria.specificity,
+          context: result.userMessage.scoreResult.criteria.context,
+          relevance: result.userMessage.scoreResult.criteria.relevance,
+        } : undefined,
+        tokensUsed: result.userMessage.tokens,
+        feedback: parsedFeedback || (result.userMessage.scoreResult?.feedback ? {
+          strengths: result.userMessage.scoreResult.feedback.strengths,
+          biggestGap: result.userMessage.scoreResult.feedback.biggestGap,
+          weakExample: result.userMessage.scoreResult.comparison?.weakExample || { prompt: '', issue: '' },
+          strongExample: result.userMessage.scoreResult.comparison?.strongExample || { prompt: '', why: '' },
+          guidingQuestions: [],
+          whatToTryNext: result.userMessage.scoreResult.feedback.improvements,
+        } : undefined),
+      };
+
+      const assistantMessage: ChatMessage = {
+        id: result.assistantMessage.id,
+        role: 'assistant',
+        content: result.assistantMessage.content,
+        timestamp: new Date(result.assistantMessage.createdAt).toLocaleTimeString(),
+        tokensUsed: result.assistantMessage.tokens,
+      };
+
+      // Replace temp message with actual messages
+      setMessages(prev => {
+        const filtered = prev.filter(m => m.id !== tempUserMessage.id);
+        return [...filtered, actualUserMessage, assistantMessage];
+      });
+      
+      // Refetch session to update sidebar counts
+      refetchCurrentSession();
+      refetchSessions();
+      
+    } catch (error) {
+      // Remove temp message on error
+      setMessages(prev => prev.filter(m => m.id !== tempUserMessage.id));
+      toast({
+        title: "Error",
+        description: "Failed to send message",
+        variant: "destructive"
+      });
+    } finally {
       setIsTyping(false);
-      refreshStats();
-    }, 1500);
+    }
   };
 
-  if (!agent) {
+  const handleNewChat = () => {
+    if (!agent) return;
+    
+    // Don't reset sessionCreatedRef - we're creating session here, not in useEffect
+    setMessages([getWelcomeMessage()]);
+    
+    // Create new session
+    createSessionMutation.mutate(
+      { 
+        modelId: agent.modelId,
+        agentId: agent.id,
+        title: `${agent.name} Chat`
+      },
+      {
+        onSuccess: (newSession) => {
+          setCurrentSessionId(newSession.id);
+          setSearchParams({ session: newSession.id });
+          refetchSessions();
+        }
+      }
+    );
+  };
+
+  const handleSwitchSession = (sessionId: string) => {
+    setCurrentSessionId(sessionId);
+    setSearchParams({ session: sessionId });
+  };
+
+  // Loading state
+  if (agentLoading) {
+    return (
+      <div className="h-screen flex items-center justify-center bg-background">
+        <div className="text-center">
+          <Loader2 className="w-16 h-16 mx-auto mb-4 text-muted-foreground animate-spin" />
+          <h2 className="text-xl font-semibold mb-2">Loading Agent...</h2>
+        </div>
+      </div>
+    );
+  }
+
+  // Error or not found state
+  if (agentError || !agent) {
     return (
       <div className="h-screen flex items-center justify-center bg-background">
         <div className="text-center">
@@ -256,16 +353,14 @@ const AgentChat = () => {
           <Button 
             className="w-full gradient-accent glow-accent btn-press font-semibold" 
             size="sm"
-            onClick={() => {
-              const newSession = createAgentSession(agent.id);
-              if (newSession) {
-                setCurrentSessionId(newSession.id);
-                setMessages([getWelcomeMessage()]);
-                navigate(`/student/agent-chat/${agent.id}`, { replace: true });
-              }
-            }}
+            onClick={handleNewChat}
+            disabled={createSessionMutation.isPending}
           >
-            <Plus className="w-4 h-4 mr-2" />
+            {createSessionMutation.isPending ? (
+              <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+            ) : (
+              <Plus className="w-4 h-4 mr-2" />
+            )}
             New Chat
           </Button>
         </div>
@@ -281,23 +376,15 @@ const AgentChat = () => {
                 <p className="font-semibold text-sm truncate">{agent.name}</p>
                 <div className="flex items-center gap-1 mt-1">
                   <Badge className="gradient-primary text-[10px]">Powered by</Badge>
-                  <span className="text-[10px] text-muted-foreground">{agent.modelName}</span>
+                  <span className="text-[10px] text-muted-foreground">{agent.model.name}</span>
                 </div>
               </div>
             </div>
-            {agent.knowledgeBaseFiles.length > 0 && (
+            {(agent.knowledgeBase?.length || 0) > 0 && (
               <div className="mt-2 pt-2 border-t border-white/5">
                 <div className="flex items-center gap-1 text-xs text-muted-foreground">
                   <FileText className="w-3 h-3" />
-                  {agent.knowledgeBaseFiles.length} KB file(s)
-                </div>
-              </div>
-            )}
-            {agent.guardrails.length > 0 && (
-              <div className="mt-1">
-                <div className="flex items-center gap-1 text-xs text-muted-foreground">
-                  <Shield className="w-3 h-3" />
-                  {agent.guardrails.length} guardrail(s)
+                  {agent.knowledgeBase?.length || 0} KB file(s)
                 </div>
               </div>
             )}
@@ -307,26 +394,37 @@ const AgentChat = () => {
         <ScrollArea className="flex-1">
           <div className="p-3 space-y-2">
             <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider px-2 mb-3">Agent Sessions</p>
-            {agentSessions.length === 0 ? (
+            
+            {/* Current Session */}
+            {currentSessionId && (
+              <div className="px-2 mb-2">
+                <div className="glass-card p-2 rounded-lg border border-primary/30 bg-primary/5">
+                  <p className="text-xs font-medium truncate text-primary">Current Session</p>
+                  <p className="text-[10px] text-muted-foreground">
+                    {messages.filter(m => m.role === 'user').length} prompts • {sessionTokensUsed} tokens
+                  </p>
+                </div>
+              </div>
+            )}
+            
+            {otherSessions.length === 0 ? (
               <div className="text-center text-xs text-muted-foreground py-6">
                 <MessageSquare className="w-8 h-8 mx-auto mb-2 opacity-30" />
                 <p>No previous sessions</p>
                 <p className="text-[10px] mt-1">Start chatting to create sessions</p>
               </div>
             ) : (
-              agentSessions.slice(0, 10).map(session => (
+              otherSessions.slice(0, 10).map((session: Session) => (
                 <Button
                   key={session.id}
                   variant="ghost"
                   className="w-full justify-start text-left h-auto py-2 px-3 hover:bg-white/5"
-                  onClick={() => {
-                    navigate(`/student/agent-chat/${agent.id}?session=${session.id}`);
-                  }}
+                  onClick={() => handleSwitchSession(session.id)}
                 >
                   <div className="flex-1 min-w-0">
                     <p className="text-xs font-medium truncate">{session.title}</p>
                     <p className="text-[10px] text-muted-foreground">
-                      {session.messageCount} prompts • {session.tokensUsed} tokens
+                      {session.promptCount} prompts • {session.tokensUsed} tokens
                     </p>
                   </div>
                 </Button>
@@ -342,11 +440,11 @@ const AgentChat = () => {
               <span className="text-xs text-muted-foreground flex items-center gap-1">
                 <Zap className="w-3 h-3" /> Token Balance
               </span>
-              <span className={`text-xs font-semibold ${stats.tokenBalance < 5000 ? 'text-orange-400' : 'text-blue-400'}`}>
-                {stats.tokenBalance.toLocaleString()}
+              <span className={`text-xs font-semibold ${(stats?.tokens.remaining || 0) < 5000 ? 'text-orange-400' : 'text-blue-400'}`}>
+                {(stats?.tokens.remaining || 0).toLocaleString()}
               </span>
             </div>
-            <Progress value={(stats.tokenBalance / stats.tokenQuota) * 100} className="h-1.5" />
+            <Progress value={stats?.tokens.usagePercent || 0} className="h-1.5" />
           </div>
           <div className="glass p-3 rounded-xl">
             <div className="flex items-center justify-between">
@@ -370,7 +468,7 @@ const AgentChat = () => {
                 <h2 className="text-xl font-bold">{agent.name}</h2>
                 <div className="flex items-center gap-2 mt-0.5">
                   <span className="text-xs text-muted-foreground">Powered by</span>
-                  <Badge className="gradient-primary text-[10px]">{agent.modelName}</Badge>
+                  <Badge className="gradient-primary text-[10px]">{agent.model.name}</Badge>
                   <Badge className={`text-[10px] ${agent.status === 'active' ? 'bg-emerald-500/20 text-emerald-400' : 'bg-orange-500/20 text-orange-400'}`}>
                     {agent.status}
                   </Badge>
@@ -462,7 +560,15 @@ const AgentChat = () => {
                     <span className="text-xs text-muted-foreground mr-2">{message.timestamp}</span>
                     {message.role === "assistant" && (
                       <>
-                        <Button variant="ghost" size="icon" className="h-7 w-7 hover:bg-white/5">
+                        <Button 
+                          variant="ghost" 
+                          size="icon" 
+                          className="h-7 w-7 hover:bg-white/5"
+                          onClick={() => {
+                            navigator.clipboard.writeText(message.content);
+                            toast({ title: "Copied to clipboard" });
+                          }}
+                        >
                           <Copy className="w-3.5 h-3.5" />
                         </Button>
                         <Button variant="ghost" size="icon" className="h-7 w-7 hover:bg-white/5">
@@ -524,9 +630,13 @@ const AgentChat = () => {
                 <Button 
                   onClick={handleSendMessage} 
                   className="btn-press h-10 px-4 gradient-accent glow-accent"
-                  disabled={isTyping || !inputMessage.trim()}
+                  disabled={isTyping || !inputMessage.trim() || sendMessageMutation.isPending}
                 >
-                  <Send className="w-4 h-4" />
+                  {sendMessageMutation.isPending ? (
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                  ) : (
+                    <Send className="w-4 h-4" />
+                  )}
                 </Button>
               </div>
             </div>
