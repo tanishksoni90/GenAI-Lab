@@ -1,0 +1,302 @@
+// Prisma Schema for GenAI Lab
+// Using SQLite for local development (easily migrated to other DBs)
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+// ==================== USERS ====================
+
+model User {
+  id            String    @id @default(uuid())
+  email         String    @unique
+  password      String
+  name          String
+  role          String    @default("student") // student | admin
+  registrationId String?  @unique
+  
+  // Student specific
+  courseId      String?
+  course        Course?   @relation(fields: [courseId], references: [id])
+  batchId       String?
+  batch         Batch?    @relation(fields: [batchId], references: [id])
+  
+  // Token management
+  tokenQuota    Int       @default(10000)
+  tokenUsed     Int       @default(0)
+  
+  // Metadata
+  isActive      Boolean   @default(true)
+  isVerified    Boolean   @default(false)
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+  lastLoginAt   DateTime?
+  
+  // Relations
+  sessions      Session[]
+  agents        Agent[]
+  artifacts     Artifact[]
+  activityLogs  ActivityLog[]
+  
+  @@index([email])
+  @@index([registrationId])
+  @@index([courseId])
+  @@index([batchId])
+}
+
+// ==================== COURSES & BATCHES ====================
+
+model Course {
+  id          String   @id @default(uuid())
+  name        String
+  description String?
+  instructor  String?
+  duration    Int?     // in weeks
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  
+  // Relations
+  batches     Batch[]
+  students    User[]
+  modelAccess ModelAccess[]
+}
+
+model Batch {
+  id          String   @id @default(uuid())
+  name        String
+  courseId    String
+  course      Course   @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  
+  // Relations
+  students    User[]
+  modelAccess ModelAccess[]
+  
+  @@index([courseId])
+}
+
+// ==================== AI MODELS ====================
+
+model AIModel {
+  id          String   @id @default(uuid())
+  name        String
+  provider    String   // openai | google | anthropic | elevenlabs
+  modelId     String   // gpt-4o, gemini-2.0-flash, etc.
+  category    String   // text | image | audio
+  description String?
+  
+  // Pricing
+  inputCost   Float    @default(0)  // per 1K tokens
+  outputCost  Float    @default(0)  // per 1K tokens
+  
+  // Configuration
+  maxTokens   Int      @default(4096)
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  
+  // Relations
+  sessions    Session[]
+  agents      Agent[]
+  modelAccess ModelAccess[]
+  
+  @@unique([provider, modelId])
+}
+
+model ModelAccess {
+  id        String   @id @default(uuid())
+  modelId   String
+  model     AIModel  @relation(fields: [modelId], references: [id], onDelete: Cascade)
+  
+  // Access can be at course, batch, or individual level
+  courseId  String?
+  course    Course?  @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  batchId   String?
+  batch     Batch?   @relation(fields: [batchId], references: [id], onDelete: Cascade)
+  studentId String?  // registration ID for individual access
+  
+  createdAt DateTime @default(now())
+  
+  @@index([modelId])
+  @@index([courseId])
+  @@index([batchId])
+}
+
+// ==================== SESSIONS & MESSAGES ====================
+
+model Session {
+  id          String    @id @default(uuid())
+  userId      String
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  modelId     String
+  model       AIModel   @relation(fields: [modelId], references: [id])
+  agentId     String?
+  agent       Agent?    @relation(fields: [agentId], references: [id])
+  
+  title       String?
+  
+  // Scoring
+  totalScore  Float     @default(0)
+  avgScore    Float     @default(0)
+  promptCount Int       @default(0)
+  
+  // Token usage
+  tokensUsed  Int       @default(0)
+  
+  // Status
+  isActive    Boolean   @default(true)
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  
+  // Relations
+  messages    Message[]
+  artifacts   Artifact[]
+  
+  @@index([userId])
+  @@index([modelId])
+  @@index([agentId])
+}
+
+model Message {
+  id          String   @id @default(uuid())
+  sessionId   String
+  session     Session  @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  
+  role        String   // user | assistant | system
+  content     String
+  
+  // For user messages - prompt scoring
+  score       Float?
+  feedback    String?  // JSON string with detailed feedback
+  
+  // Token count
+  tokens      Int      @default(0)
+  
+  createdAt   DateTime @default(now())
+  
+  @@index([sessionId])
+}
+
+// ==================== AI AGENTS ====================
+
+model Agent {
+  id              String   @id @default(uuid())
+  userId          String
+  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  modelId         String
+  model           AIModel  @relation(fields: [modelId], references: [id])
+  
+  name            String
+  description     String?
+  behaviorPrompt  String?
+  strictMode      Boolean  @default(false)
+  
+  // Knowledge base files (JSON array of file paths)
+  knowledgeBase   String?  // JSON array
+  
+  // Stats
+  sessionsCount   Int      @default(0)
+  messagesCount   Int      @default(0)
+  tokensUsed      Int      @default(0)
+  
+  isActive        Boolean  @default(true)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  
+  // Relations
+  sessions        Session[]
+  guardrails      AgentGuardrail[]
+  
+  @@index([userId])
+  @@index([modelId])
+}
+
+model AgentGuardrail {
+  id          String   @id @default(uuid())
+  agentId     String
+  agent       Agent    @relation(fields: [agentId], references: [id], onDelete: Cascade)
+  guardrailId String
+  guardrail   Guardrail @relation(fields: [guardrailId], references: [id])
+  
+  @@unique([agentId, guardrailId])
+}
+
+// ==================== GUARDRAILS ====================
+
+model Guardrail {
+  id          String   @id @default(uuid())
+  type        String   // educational_integrity | content_safety | behavioral_guidelines | custom
+  title       String
+  instruction String
+  appliesTo   String   @default("both") // input | output | both
+  priority    Int      @default(5)      // 1-10
+  
+  isSystem    Boolean  @default(false)  // System guardrails can't be deleted
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  
+  // Relations
+  agentGuardrails AgentGuardrail[]
+}
+
+// ==================== ARTIFACTS ====================
+
+model Artifact {
+  id          String   @id @default(uuid())
+  userId      String
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  sessionId   String
+  session     Session  @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  
+  type        String   // text | code | image | audio
+  title       String?
+  content     String   // For text/code, actual content. For image/audio, file path
+  
+  // Metadata
+  modelUsed   String?
+  score       Float?
+  
+  isBookmarked Boolean @default(false)
+  createdAt   DateTime @default(now())
+  
+  @@index([userId])
+  @@index([sessionId])
+}
+
+// ==================== API KEYS (Admin managed) ====================
+
+model APIKey {
+  id        String   @id @default(uuid())
+  provider  String   @unique // openai | google | anthropic | elevenlabs
+  apiKey    String
+  baseUrl   String?
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+// ==================== ACTIVITY LOGS ====================
+
+model ActivityLog {
+  id        String   @id @default(uuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  action    String   // login | session_start | prompt | agent_create | etc.
+  details   String?  // JSON string with additional details
+  
+  createdAt DateTime @default(now())
+  
+  @@index([userId])
+  @@index([createdAt])
+}
+

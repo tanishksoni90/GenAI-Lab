@@ -1,0 +1,325 @@
+import { prisma } from '../lib/prisma';
+import { NotFoundError, InsufficientTokensError, ForbiddenError } from '../utils/errors';
+import * as aiService from './ai.service';
+import * as scoringService from './scoring.service';
+
+// Create a new session
+export const createSession = async (
+  userId: string,
+  modelId: string,
+  agentId?: string
+) => {
+  // Verify model exists
+  const model = await aiService.getModelById(modelId);
+
+  // Check user has tokens
+  const user = await prisma.user.findUnique({
+    where: { id: userId },
+    select: { tokenQuota: true, tokenUsed: true },
+  });
+
+  if (!user) {
+    throw new NotFoundError('User not found');
+  }
+
+  if (user.tokenUsed >= user.tokenQuota) {
+    throw new InsufficientTokensError();
+  }
+
+  // Create session
+  const session = await prisma.session.create({
+    data: {
+      userId,
+      modelId,
+      agentId,
+      title: `${model.name} Session`,
+    },
+    include: {
+      model: {
+        select: { id: true, name: true, provider: true, category: true },
+      },
+      agent: {
+        select: { id: true, name: true, behaviorPrompt: true },
+      },
+    },
+  });
+
+  // Log activity
+  await prisma.activityLog.create({
+    data: {
+      userId,
+      action: 'session_start',
+      details: JSON.stringify({ sessionId: session.id, modelId, agentId }),
+    },
+  });
+
+  return session;
+};
+
+// Get session by ID
+export const getSession = async (sessionId: string, userId: string) => {
+  const session = await prisma.session.findUnique({
+    where: { id: sessionId },
+    include: {
+      model: {
+        select: { id: true, name: true, provider: true, category: true },
+      },
+      agent: {
+        select: { id: true, name: true },
+      },
+      messages: {
+        orderBy: { createdAt: 'asc' },
+      },
+    },
+  });
+
+  if (!session) {
+    throw new NotFoundError('Session not found');
+  }
+
+  if (session.userId !== userId) {
+    throw new ForbiddenError('Not authorized to access this session');
+  }
+
+  return session;
+};
+
+// Get user's sessions
+export const getUserSessions = async (
+  userId: string,
+  options: {
+    page?: number;
+    limit?: number;
+    modelId?: string;
+    agentId?: string;
+  } = {}
+) => {
+  const { page = 1, limit = 20, modelId, agentId } = options;
+  const skip = (page - 1) * limit;
+
+  const where: any = { userId };
+  if (modelId) where.modelId = modelId;
+  if (agentId) where.agentId = agentId;
+
+  const [sessions, total] = await Promise.all([
+    prisma.session.findMany({
+      where,
+      orderBy: { updatedAt: 'desc' },
+      skip,
+      take: limit,
+      include: {
+        model: {
+          select: { id: true, name: true, provider: true, category: true },
+        },
+        agent: {
+          select: { id: true, name: true },
+        },
+        _count: {
+          select: { messages: true },
+        },
+      },
+    }),
+    prisma.session.count({ where }),
+  ]);
+
+  return { sessions, total, page, limit };
+};
+
+// Send a message in a session
+export const sendMessage = async (
+  sessionId: string,
+  userId: string,
+  content: string
+) => {
+  // Get session with messages
+  const session = await prisma.session.findUnique({
+    where: { id: sessionId },
+    include: {
+      model: true,
+      agent: true,
+      messages: {
+        orderBy: { createdAt: 'asc' },
+      },
+    },
+  });
+
+  if (!session) {
+    throw new NotFoundError('Session not found');
+  }
+
+  if (session.userId !== userId) {
+    throw new ForbiddenError('Not authorized to access this session');
+  }
+
+  // Check user has tokens
+  const user = await prisma.user.findUnique({
+    where: { id: userId },
+    select: { tokenQuota: true, tokenUsed: true },
+  });
+
+  if (!user) {
+    throw new NotFoundError('User not found');
+  }
+
+  if (user.tokenUsed >= user.tokenQuota) {
+    throw new InsufficientTokensError();
+  }
+
+  // Prepare conversation history
+  const conversationHistory = session.messages.map(m => ({
+    role: m.role,
+    content: m.content,
+  }));
+
+  // Score the user's prompt
+  const scoreResult = scoringService.scorePrompt(content, conversationHistory);
+
+  // Get AI response
+  const aiResponse = await aiService.chatWithModel(
+    session.modelId,
+    content,
+    conversationHistory
+  );
+
+  // Estimate tokens for user message
+  const userTokens = Math.ceil(content.length / 4);
+
+  // Create user message
+  const userMessage = await prisma.message.create({
+    data: {
+      sessionId,
+      role: 'user',
+      content,
+      score: scoreResult.totalScore,
+      feedback: JSON.stringify(scoreResult),
+      tokens: userTokens,
+    },
+  });
+
+  // Create assistant message
+  const assistantMessage = await prisma.message.create({
+    data: {
+      sessionId,
+      role: 'assistant',
+      content: aiResponse.response,
+      tokens: aiResponse.tokensUsed - userTokens,
+    },
+  });
+
+  // Update session stats
+  const allScores = [...session.messages.filter(m => m.score).map(m => m.score!), scoreResult.totalScore];
+  const avgScore = scoringService.calculateSessionScore(allScores);
+
+  await prisma.session.update({
+    where: { id: sessionId },
+    data: {
+      promptCount: { increment: 1 },
+      totalScore: { increment: scoreResult.totalScore },
+      avgScore,
+      tokensUsed: { increment: aiResponse.tokensUsed },
+      updatedAt: new Date(),
+    },
+  });
+
+  // Deduct tokens from user
+  await prisma.user.update({
+    where: { id: userId },
+    data: {
+      tokenUsed: { increment: aiResponse.tokensUsed },
+    },
+  });
+
+  // Update agent stats if applicable
+  if (session.agentId) {
+    await prisma.agent.update({
+      where: { id: session.agentId },
+      data: {
+        messagesCount: { increment: 2 }, // user + assistant
+        tokensUsed: { increment: aiResponse.tokensUsed },
+      },
+    });
+  }
+
+  return {
+    userMessage: {
+      ...userMessage,
+      scoreResult,
+    },
+    assistantMessage,
+    tokensUsed: aiResponse.tokensUsed,
+    isMock: aiResponse.isMock,
+    sessionStats: {
+      avgScore,
+      promptCount: session.promptCount + 1,
+      tokensUsed: session.tokensUsed + aiResponse.tokensUsed,
+    },
+  };
+};
+
+// Get session messages
+export const getSessionMessages = async (sessionId: string, userId: string) => {
+  const session = await prisma.session.findUnique({
+    where: { id: sessionId },
+    select: { userId: true },
+  });
+
+  if (!session) {
+    throw new NotFoundError('Session not found');
+  }
+
+  if (session.userId !== userId) {
+    throw new ForbiddenError('Not authorized to access this session');
+  }
+
+  return prisma.message.findMany({
+    where: { sessionId },
+    orderBy: { createdAt: 'asc' },
+  });
+};
+
+// Update session title
+export const updateSessionTitle = async (
+  sessionId: string,
+  userId: string,
+  title: string
+) => {
+  const session = await prisma.session.findUnique({
+    where: { id: sessionId },
+    select: { userId: true },
+  });
+
+  if (!session) {
+    throw new NotFoundError('Session not found');
+  }
+
+  if (session.userId !== userId) {
+    throw new ForbiddenError('Not authorized to access this session');
+  }
+
+  return prisma.session.update({
+    where: { id: sessionId },
+    data: { title },
+  });
+};
+
+// End/deactivate session
+export const endSession = async (sessionId: string, userId: string) => {
+  const session = await prisma.session.findUnique({
+    where: { id: sessionId },
+    select: { userId: true },
+  });
+
+  if (!session) {
+    throw new NotFoundError('Session not found');
+  }
+
+  if (session.userId !== userId) {
+    throw new ForbiddenError('Not authorized to access this session');
+  }
+
+  return prisma.session.update({
+    where: { id: sessionId },
+    data: { isActive: false },
+  });
+};
+
