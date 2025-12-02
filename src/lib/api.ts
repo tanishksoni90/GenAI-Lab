@@ -45,6 +45,11 @@ async function apiRequest<T>(
     headers,
   });
 
+  // Handle 204 No Content responses (e.g., from DELETE operations)
+  if (response.status === 204) {
+    return { success: true, data: null } as T;
+  }
+
   const data = await response.json();
 
   if (!response.ok) {
@@ -230,8 +235,8 @@ export interface ScoreResult {
     suggestion: string;
   };
   comparison: {
-    weakExample: string;
-    strongExample: string;
+    weakExample: { prompt: string; issue: string };
+    strongExample: { prompt: string; why: string };
   };
 }
 
@@ -248,17 +253,18 @@ export interface SendMessageResult {
 }
 
 export const sessionsApi = {
-  create: (modelId: string, agentId?: string) =>
+  create: (data: { modelId: string; agentId?: string; title?: string }) =>
     apiRequest<ApiResponse<{ session: Session }>>('/sessions', {
       method: 'POST',
-      body: JSON.stringify({ modelId, agentId }),
+      body: JSON.stringify(data),
     }),
 
-  getAll: (params?: { page?: number; limit?: number; modelId?: string }) => {
+  getAll: (params?: { page?: number; limit?: number; modelId?: string; agentId?: string }) => {
     const query = new URLSearchParams();
     if (params?.page) query.set('page', params.page.toString());
     if (params?.limit) query.set('limit', params.limit.toString());
     if (params?.modelId) query.set('modelId', params.modelId);
+    if (params?.agentId) query.set('agentId', params.agentId);
     return apiRequest<PaginatedResponse<Session>>(`/sessions?${query}`);
   },
 
@@ -363,6 +369,7 @@ export interface Agent {
   sessionsCount: number;
   messagesCount: number;
   tokensUsed: number;
+  status: 'active' | 'inactive';
   model: {
     id: string;
     name: string;

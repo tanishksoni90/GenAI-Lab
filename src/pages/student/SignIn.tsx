@@ -6,12 +6,12 @@ import { useNavigate } from "react-router-dom";
 import { GraduationCap, ArrowRight, Sparkles, Mail, Lock, Loader2 } from "lucide-react";
 import { useState } from "react";
 import { useToast } from "@/hooks/use-toast";
-import { useUser } from "@/contexts/UserContext";
+import { useAuth } from "@/contexts/AuthContext";
 
 const StudentSignIn = () => {
   const navigate = useNavigate();
   const { toast } = useToast();
-  const { loginUser } = useUser();
+  const { login, isLoading: authLoading } = useAuth();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [isLoading, setIsLoading] = useState(false);
@@ -32,24 +32,24 @@ const StudentSignIn = () => {
 
     setIsLoading(true);
     
-    // Use the new loginUser function
-    const result = loginUser(email, password);
-    
-    setIsLoading(false);
-    
-    if (result.success) {
+    try {
+      // Use the real backend API for authentication
+      await login({ email, password });
       toast({
         title: "Login successful",
         description: "Welcome back! Continue your prompt engineering journey.",
       });
-      navigate('/student/dashboard');
-    } else {
-      setError(result.error || "Login failed");
+      // Navigation is handled automatically by AuthContext based on user role
+    } catch (err: any) {
+      const errorMessage = err?.message || "Login failed. Please check your credentials.";
+      setError(errorMessage);
       toast({
         title: "Login failed",
-        description: result.error || "Please check your credentials and try again.",
+        description: errorMessage,
         variant: "destructive",
       });
+    } finally {
+      setIsLoading(false);
     }
   };
 
