@@ -197,6 +197,16 @@ export const testAPIKey = async (req: Request, res: Response, next: NextFunction
   }
 };
 
+export const deleteAPIKey = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { provider } = req.params;
+    const result = await adminService.deleteAPIKey(provider);
+    return sendSuccess(res, result);
+  } catch (error) {
+    next(error);
+  }
+};
+
 // ==================== GUARDRAILS ====================
 
 export const getGuardrails = async (req: Request, res: Response, next: NextFunction) => {
@@ -235,6 +245,47 @@ export const deleteGuardrail = async (req: Request, res: Response, next: NextFun
   }
 };
 
+// ==================== AI MODEL MANAGEMENT ====================
+
+export const getAllModels = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const models = await adminService.getAllModelsAdmin();
+    return sendSuccess(res, { models });
+  } catch (error) {
+    next(error);
+  }
+};
+
+export const updateModel = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { modelId } = req.params;
+    const model = await adminService.updateModel(modelId, req.body);
+    return sendSuccess(res, { model });
+  } catch (error) {
+    next(error);
+  }
+};
+
+export const toggleModelActive = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { modelId } = req.params;
+    const model = await adminService.toggleModelActive(modelId);
+    return sendSuccess(res, { model, message: model.isActive ? 'Model activated' : 'Model deactivated' });
+  } catch (error) {
+    next(error);
+  }
+};
+
+export const testModel = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { modelId } = req.params;
+    const result = await adminService.testModel(modelId);
+    return sendSuccess(res, result);
+  } catch (error) {
+    next(error);
+  }
+};
+
 // ==================== MODEL ACCESS ====================
 
 export const getModelAccess = async (req: Request, res: Response, next: NextFunction) => {
@@ -259,6 +310,26 @@ export const removeModelAccess = async (req: Request, res: Response, next: NextF
   try {
     const result = await adminService.removeModelAccess(req.params.id);
     return sendSuccess(res, result);
+  } catch (error) {
+    next(error);
+  }
+};
+
+// ==================== SETTINGS ====================
+
+export const getSettings = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const settings = await adminService.getSettings();
+    return sendSuccess(res, { settings });
+  } catch (error) {
+    next(error);
+  }
+};
+
+export const updateSettings = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const settings = await adminService.updateSettings(req.body);
+    return sendSuccess(res, { settings }, 'Settings updated successfully');
   } catch (error) {
     next(error);
   }

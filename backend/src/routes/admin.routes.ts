@@ -95,6 +95,22 @@ const modelAccessSchema = z.object({
   }),
 });
 
+const updateSettingsSchema = z.object({
+  body: z.object({
+    // Token settings
+    defaultTokenQuota: z.number().int().positive().optional(),
+    autoRefill: z.boolean().optional(),
+    lowBalanceAlert: z.boolean().optional(),
+    hardLimitEnforcement: z.boolean().optional(),
+    lowBalanceThreshold: z.number().int().min(1).max(50).optional(),
+    // Guardrails settings
+    maxTokensPerRequest: z.number().int().positive().max(100000).optional(),
+    maxRequestsPerMinute: z.number().int().positive().max(100).optional(),
+    aiIntentDetection: z.boolean().optional(),
+    strictMode: z.boolean().optional(),
+  }),
+});
+
 // ==================== STUDENT ROUTES ====================
 
 router.get('/students', adminController.getStudents);
@@ -127,6 +143,7 @@ router.get('/analytics', adminController.getAnalytics);
 
 router.get('/api-keys', adminController.getAPIKeys);
 router.put('/api-keys/:provider', validate(updateAPIKeySchema), adminController.updateAPIKey);
+router.delete('/api-keys/:provider', adminController.deleteAPIKey);
 router.post('/api-keys/:provider/test', adminController.testAPIKey);
 
 // ==================== GUARDRAILS ====================
@@ -136,11 +153,23 @@ router.post('/guardrails', validate(createGuardrailSchema), adminController.crea
 router.put('/guardrails/:id', adminController.updateGuardrail);
 router.delete('/guardrails/:id', adminController.deleteGuardrail);
 
+// ==================== AI MODELS (ADMIN) ====================
+
+router.get('/models', adminController.getAllModels);
+router.put('/models/:modelId', adminController.updateModel);
+router.post('/models/:modelId/toggle', adminController.toggleModelActive);
+router.post('/models/:modelId/test', adminController.testModel);
+
 // ==================== MODEL ACCESS ====================
 
 router.get('/models/:modelId/access', adminController.getModelAccess);
 router.post('/models/access', validate(modelAccessSchema), adminController.addModelAccess);
 router.delete('/models/access/:id', adminController.removeModelAccess);
+
+// ==================== SETTINGS ====================
+
+router.get('/settings', adminController.getSettings);
+router.put('/settings', validate(updateSettingsSchema), adminController.updateSettings);
 
 export default router;
 

@@ -187,6 +187,25 @@ async function main() {
   ]);
   console.log(`✅ Created ${guardrails.length} guardrails\n`);
 
+  // Create API Key placeholders for providers
+  console.log('Creating API Key provider placeholders...');
+  const apiKeyProviders = ['openai', 'google', 'anthropic', 'elevenlabs', 'groq', 'mistral'];
+  const apiKeys = await Promise.all(
+    apiKeyProviders.map(provider =>
+      prisma.aPIKey.upsert({
+        where: { provider },
+        update: {},
+        create: {
+          provider,
+          apiKey: '', // Empty - admin needs to configure
+          baseUrl: null,
+          isActive: false,
+        },
+      })
+    )
+  );
+  console.log(`✅ Created ${apiKeys.length} API key placeholders\n`);
+
   // Create Demo Course and Batch
   console.log('Creating Demo Course and Batch...');
   const course = await prisma.course.upsert({

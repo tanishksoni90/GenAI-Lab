@@ -300,3 +300,22 @@ model ActivityLog {
   @@index([createdAt])
 }
 
+// ==================== SETTINGS ====================
+
+model Settings {
+  id                    String   @id @default("default")
+  // Token Settings
+  defaultTokenQuota     Int      @default(100000)
+  autoRefill            Boolean  @default(false)
+  lowBalanceAlert       Boolean  @default(false)
+  hardLimitEnforcement  Boolean  @default(true)
+  lowBalanceThreshold   Int      @default(10) // percentage
+  // Guardrails Settings
+  maxTokensPerRequest   Int      @default(2000)
+  maxRequestsPerMinute  Int      @default(15)
+  aiIntentDetection     Boolean  @default(true)
+  strictMode            Boolean  @default(false)
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+}
+
