@@ -610,6 +610,8 @@ const Landing = () => {
               <a href="#" className="hover:text-foreground transition-colors">Privacy Policy</a>
               <a href="#" className="hover:text-foreground transition-colors">Terms of Service</a>
               <a href="#" className="hover:text-foreground transition-colors">Contact</a>
+              <span className="text-white/10">|</span>
+              <a href="/admin/signin" className="hover:text-foreground transition-colors opacity-50 hover:opacity-100">Admin Portal</a>
             </div>
             <div className="text-sm text-muted-foreground">
               © 2025 GenAI Lab. All rights reserved.

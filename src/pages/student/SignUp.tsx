@@ -6,12 +6,12 @@ import { useNavigate } from "react-router-dom";
 import { GraduationCap, ArrowRight, Sparkles, Mail, Lock, User, Hash, Loader2, CheckCircle, XCircle } from "lucide-react";
 import { useState, useMemo } from "react";
 import { useToast } from "@/hooks/use-toast";
-import { useUser } from "@/contexts/UserContext";
+import { useAuth } from "@/contexts/AuthContext";
 
 const StudentSignUp = () => {
   const navigate = useNavigate();
   const { toast } = useToast();
-  const { registerUser } = useUser();
+  const { register, error: authError, clearError } = useAuth();
   const [registrationId, setRegistrationId] = useState("");
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
@@ -65,32 +65,33 @@ const StudentSignUp = () => {
     }
 
     setIsLoading(true);
+    setError("");
+    clearError();
     
-    // Use the new registerUser function
-    const userId = `user-${email.toLowerCase().replace(/[@.]/g, '-')}`;
-    const result = registerUser({
-      id: userId,
-      name,
-      email,
-      registrationId,
-      password, // Will be hashed in registerUser
-    });
-    
-    setIsLoading(false);
-    
-    if (result.success) {
+    try {
+      // Use the real backend API via AuthContext
+      await register({
+        name,
+        email,
+        password,
+        registrationId,
+      });
+      
       toast({
         title: "Registration successful",
         description: "Welcome to GenAI Lab! Start your prompt engineering journey.",
       });
-      navigate('/student/dashboard');
-    } else {
-      setError(result.error || "Registration failed");
+      // Navigation is handled by AuthContext after successful registration
+    } catch (err) {
+      const errorMessage = err instanceof Error ? err.message : "Registration failed. Please try again.";
+      setError(errorMessage);
       toast({
         title: "Registration failed",
-        description: result.error || "Please try again.",
+        description: errorMessage,
         variant: "destructive",
       });
+    } finally {
+      setIsLoading(false);
     }
   };
 

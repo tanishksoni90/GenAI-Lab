@@ -42,8 +42,70 @@ export const config = {
     },
   },
   
-  // Default token quota for new students
-  defaultTokenQuota: 10000,
+  // ==================== PRICING CONFIGURATION ====================
+  // Student Billing Model:
+  // - Student pays: ₹2,000 per enrollment
+  // - Actual API budget: ₹1,500 (real cost limit)
+  // - Profit margin: ₹500 per student
+  // - Virtual display tokens: 50,000 (just for UI display)
+  
+  pricing: {
+    // Enrollment fee charged to student (₹)
+    enrollmentFee: 2000,
+    
+    // Actual API budget per student (₹) - this is the real spending limit
+    studentBudgetINR: 1500,
+    
+    // Virtual tokens shown to student (display only)
+    virtualTokenQuota: 50000,
+    
+    // USD to INR conversion rate (update periodically)
+    usdToInr: 84,
+  },
+};
+
+// Helper functions for token/budget conversion
+export const pricingHelpers = {
+  /**
+   * Convert actual INR spent to virtual tokens used
+   * Formula: Virtual Tokens Used = (Actual ₹ Spent / Budget) × Virtual Quota
+   */
+  inrToVirtualTokens: (inrSpent: number): number => {
+    const { studentBudgetINR, virtualTokenQuota } = config.pricing;
+    return Math.round((inrSpent / studentBudgetINR) * virtualTokenQuota);
+  },
+  
+  /**
+   * Convert virtual tokens to INR equivalent
+   * Formula: INR = (Virtual Tokens / Virtual Quota) × Budget
+   */
+  virtualTokensToInr: (tokens: number): number => {
+    const { studentBudgetINR, virtualTokenQuota } = config.pricing;
+    return (tokens / virtualTokenQuota) * studentBudgetINR;
+  },
+  
+  /**
+   * Get remaining virtual tokens from INR spent
+   */
+  getRemainingVirtualTokens: (inrSpent: number): number => {
+    const { studentBudgetINR, virtualTokenQuota } = config.pricing;
+    const remaining = Math.max(0, studentBudgetINR - inrSpent);
+    return Math.round((remaining / studentBudgetINR) * virtualTokenQuota);
+  },
+  
+  /**
+   * Get remaining budget in INR
+   */
+  getRemainingBudgetINR: (inrSpent: number): number => {
+    return Math.max(0, config.pricing.studentBudgetINR - inrSpent);
+  },
+  
+  /**
+   * Convert USD to INR
+   */
+  usdToInr: (usd: number): number => {
+    return usd * config.pricing.usdToInr;
+  },
 };
 
 export default config;

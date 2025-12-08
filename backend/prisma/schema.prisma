@@ -26,9 +26,15 @@ model User {
   batchId       String?
   batch         Batch?    @relation(fields: [batchId], references: [id])
   
-  // Token management
-  tokenQuota    Int       @default(10000)
-  tokenUsed     Int       @default(0)
+  // Budget & Token management
+  // budgetLimit: Actual INR budget limit (default ₹1,500)
+  // budgetUsed: Actual INR spent on API calls
+  // tokenQuota: Virtual tokens for display (default 50,000)
+  // tokenUsed: Virtual tokens used (calculated from budgetUsed)
+  budgetLimit   Float     @default(1500)  // INR budget limit
+  budgetUsed    Float     @default(0)     // INR spent
+  tokenQuota    Int       @default(50000) // Virtual display tokens
+  tokenUsed     Int       @default(0)     // Virtual tokens used
   
   // Metadata
   isActive      Boolean   @default(true)
@@ -90,12 +96,20 @@ model AIModel {
   name        String
   provider    String   // openai | google | anthropic | elevenlabs
   modelId     String   // gpt-4o, gemini-2.0-flash, etc.
-  category    String   // text | image | audio
+  category    String   // text | image | audio | multimodal | code
   description String?
   
-  // Pricing
-  inputCost   Float    @default(0)  // per 1K tokens
-  outputCost  Float    @default(0)  // per 1K tokens
+  // Pricing in INR (for actual cost tracking)
+  // For text/code models: cost per 1K tokens in INR
+  // For image models: cost per image in INR
+  // For audio models: cost per 1K characters in INR
+  inputCostINR   Float    @default(0)  // INR per 1K input tokens
+  outputCostINR  Float    @default(0)  // INR per 1K output tokens
+  requestCostINR Float    @default(0)  // INR per request (for image/audio)
+  
+  // Legacy fields (keep for backward compatibility, but use INR fields)
+  inputCost   Float    @default(0)  // per 1K tokens (deprecated)
+  outputCost  Float    @default(0)  // per 1K tokens (deprecated)
   
   // Configuration
   maxTokens   Int      @default(4096)
@@ -298,5 +312,24 @@ model ActivityLog {
   
   @@index([userId])
   @@index([createdAt])
+}
+
+// ==================== SETTINGS ====================
+
+model Settings {
+  id                    String   @id @default("default")
+  // Token Settings
+  defaultTokenQuota     Int      @default(100000)
+  autoRefill            Boolean  @default(false)
+  lowBalanceAlert       Boolean  @default(false)
+  hardLimitEnforcement  Boolean  @default(true)
+  lowBalanceThreshold   Int      @default(10) // percentage
+  // Guardrails Settings
+  maxTokensPerRequest   Int      @default(2000)
+  maxRequestsPerMinute  Int      @default(15)
+  aiIntentDetection     Boolean  @default(true)
+  strictMode            Boolean  @default(false)
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
 }
 

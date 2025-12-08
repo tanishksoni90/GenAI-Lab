@@ -42,9 +42,9 @@ import {
   Zap, Activity, Target, Award, Bell, Brain, ChevronRight, Flame, 
   GraduationCap, LayoutGrid, Upload, X, FileUp, Shield, Search,
   ArrowUpRight, Layers, User, LogOut, Cpu, Lock, Unlock, Info, Volume2,
-  ChevronLeft, CreditCard, Check, Loader2
+  ChevronLeft, CreditCard, Check, Loader2, RefreshCw
 } from "lucide-react";
-import { mockEnrolledCourses, mockAssignments, mockGuardrails } from "@/lib/mockData";
+// Note: Assignments feature not yet implemented - no mock data needed
 
 const StudentDashboard = () => {
   const navigate = useNavigate();
@@ -62,20 +62,93 @@ const StudentDashboard = () => {
   } = useUser();
 
   // Backend API data via React Query
-  const { data: dashboardData, isLoading: isDashboardLoading } = useDashboardStats();
-  const { data: recentSessions = [], isLoading: isSessionsLoading } = useRecentSessions(10);
-  const { data: agentsData = [], isLoading: isAgentsLoading } = useAgents();
-  const { data: artifactsData, isLoading: isArtifactsLoading } = useArtifacts();
-  const { data: modelsData = [], isLoading: isModelsLoading } = useModels();
-  const { data: guardrailsData = [] } = useGuardrails();
+  const { data: dashboardData, isLoading: isDashboardLoading, refetch: refetchDashboard } = useDashboardStats();
+  const { data: recentSessions = [], isLoading: isSessionsLoading, refetch: refetchSessions } = useRecentSessions(10);
+  const { data: agentsData = [], isLoading: isAgentsLoading, refetch: refetchAgents } = useAgents();
+  const { data: artifactsData, isLoading: isArtifactsLoading, refetch: refetchArtifacts } = useArtifacts();
+  const { data: modelsData = [], isLoading: isModelsLoading, refetch: refetchModels } = useModels();
+  const { data: guardrailsData = [], refetch: refetchGuardrails } = useGuardrails();
   
   // Leaderboard data
   const [leaderboardView, setLeaderboardView] = useState<"institutional" | "course">("institutional");
-  const [selectedCourse, setSelectedCourse] = useState<string>("all");
-  const { data: leaderboardData, isLoading: isLeaderboardLoading } = useLeaderboard(
+  
+  // Get enrolled course from dashboard data for leaderboard filtering
+  const enrolledCourseId = dashboardData?.user?.course?.id;
+  
+  // Pass courseId only when viewing course leaderboard
+  const leaderboardCourseId = leaderboardView === 'course' ? enrolledCourseId : undefined;
+  
+  const { data: rawLeaderboardData, isLoading: isLeaderboardLoading, refetch: refetchLeaderboard, error: leaderboardError } = useLeaderboard(
     leaderboardView, 
-    leaderboardView === 'course' && selectedCourse !== 'all' ? selectedCourse : undefined
+    leaderboardCourseId
   );
+  
+  // Ensure leaderboardData is always an array
+  // Handle both cases: rawLeaderboardData could be the array directly OR an object {leaderboard: [...], type: "..."}
+  const leaderboardData = Array.isArray(rawLeaderboardData) 
+    ? rawLeaderboardData 
+    : (rawLeaderboardData?.leaderboard && Array.isArray(rawLeaderboardData.leaderboard)) 
+      ? rawLeaderboardData.leaderboard 
+      : [];
+
+  // Refresh state
+  const [isRefreshing, setIsRefreshing] = useState(false);
+
+  // Handle refresh
+  const handleRefresh = async (section?: string) => {
+    setIsRefreshing(true);
+    try {
+      if (section) {
+        switch (section) {
+          case 'overview':
+            await Promise.all([refetchDashboard(), refetchSessions()]);
+            break;
+          case 'models':
+            await refetchModels();
+            break;
+          case 'agents':
+            await refetchAgents();
+            break;
+          case 'leaderboard':
+            await refetchLeaderboard();
+            break;
+          case 'artifacts':
+            await refetchArtifacts();
+            break;
+          default:
+            await Promise.all([
+              refetchDashboard(),
+              refetchSessions(),
+              refetchAgents(),
+              refetchArtifacts(),
+              refetchModels(),
+              refetchLeaderboard(),
+            ]);
+        }
+      } else {
+        await Promise.all([
+          refetchDashboard(),
+          refetchSessions(),
+          refetchAgents(),
+          refetchArtifacts(),
+          refetchModels(),
+          refetchLeaderboard(),
+        ]);
+      }
+      toast({
+        title: 'Refreshed',
+        description: section ? `${section.charAt(0).toUpperCase() + section.slice(1)} data updated` : 'All data refreshed',
+      });
+    } catch (error) {
+      toast({
+        title: 'Refresh Failed',
+        description: 'Failed to refresh data. Please try again.',
+        variant: 'destructive',
+      });
+    } finally {
+      setIsRefreshing(false);
+    }
+  };
 
   // Mutations
   const createAgentMutation = useCreateAgent();
@@ -92,9 +165,13 @@ const StudentDashboard = () => {
 
   // Derived data from API responses
   const userName = user?.name || dashboardData?.user?.name || 'Student';
+  const userId = user?.id || dashboardData?.user?.id;
+  
+  // Get enrolled course from dashboard data
+  const enrolledCourse = dashboardData?.user?.course || null;
   
   // Find user's rank from leaderboard data
-  const userRankInLeaderboard = leaderboardData?.leaderboard?.find(entry => entry.id === user?.id)?.rank;
+  const userRankInLeaderboard = leaderboardData.find(entry => entry.id === userId)?.rank;
   
   const stats = {
     tokenBalance: dashboardData?.tokens?.remaining || 0,
@@ -112,8 +189,8 @@ const StudentDashboard = () => {
     currentStreak: 0, // TODO: Add to backend
     courseRank: userRankInLeaderboard || 0,
     institutionalRank: userRankInLeaderboard || 0,
-    totalInCourse: leaderboardData?.leaderboard?.length || 0,
-    totalInInstitution: leaderboardData?.leaderboard?.length || 0,
+    totalInCourse: leaderboardData.length,
+    totalInInstitution: leaderboardData.length,
     // Calculate active days from recent sessions
     activeDays: recentSessions.map(s => s.createdAt),
   };
@@ -127,8 +204,8 @@ const StudentDashboard = () => {
   const getAgentSessions = (agentId: string) => sessions.filter(s => s.agentId === agentId);
 
   // Leaderboard helpers  
-  const getCourseLeaderboard = () => leaderboardData?.leaderboard || [];
-  const getInstitutionalLeaderboard = () => leaderboardData?.leaderboard || [];
+  const getCourseLeaderboard = () => leaderboardData;
+  const getInstitutionalLeaderboard = () => leaderboardData;
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const editFileInputRef = useRef<HTMLInputElement>(null);
@@ -139,7 +216,7 @@ const StudentDashboard = () => {
   const [editingAgent, setEditingAgent] = useState<any>(null);
   const [isCreateGuardrailOpen, setIsCreateGuardrailOpen] = useState(false);
   const [activeTab, setActiveTab] = useState(searchParams.get('tab') || 'overview');
-  const [selectedModelCategory, setSelectedModelCategory] = useState<"text" | "image" | "audio" | "video" | "other">(
+  const [selectedModelCategory, setSelectedModelCategory] = useState<"text" | "image" | "audio" | "video" | "code" | "multimodal">(
     (searchParams.get('category') as any) || "text"
   );
   
@@ -427,24 +504,14 @@ const StudentDashboard = () => {
       <header className="sticky top-0 z-50 glass border-b border-white/5">
         <div className="px-6 py-4">
           <div className="flex items-center justify-between">
-            <div className="flex items-center gap-4">
-              <Button 
-                variant="ghost" 
-                size="icon" 
-                onClick={() => navigate("/")} 
-                className="hover:bg-white/5"
-              >
-                <ArrowLeft className="w-5 h-5" />
-              </Button>
-              <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-xl gradient-secondary glow-secondary flex items-center justify-center">
-                  <GraduationCap className="w-5 h-5 text-white" />
-                </div>
-              <div>
-                  <h1 className="text-xl font-bold">Welcome back, {userName}!</h1>
-                  <p className="text-sm text-muted-foreground">Continue your AI journey</p>
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-xl gradient-secondary glow-secondary flex items-center justify-center">
+                <GraduationCap className="w-5 h-5 text-white" />
               </div>
-            </div>
+              <div>
+                <h1 className="text-xl font-bold">Welcome back, {userName}!</h1>
+                <p className="text-sm text-muted-foreground">Continue your AI journey</p>
+              </div>
             </div>
             
             <div className="flex items-center gap-3">
@@ -572,7 +639,7 @@ const StudentDashboard = () => {
                   </div>
                 </PopoverContent>
               </Popover>
-        </div>
+            </div>
           </div>
         </div>
       </header>
@@ -650,12 +717,18 @@ const StudentDashboard = () => {
                     <h2 className="text-2xl font-bold">Recent Sessions</h2>
                     <p className="text-muted-foreground">Continue where you left off</p>
                     </div>
-                  {sessions.length > 0 && (
-                    <Button variant="outline" className="glass hover-glow" onClick={() => setActiveTab('models')}>
-                      Start New
-                      <ChevronRight className="w-4 h-4 ml-2" />
+                  <div className="flex items-center gap-2">
+                    <Button variant="outline" size="sm" className="glass" onClick={() => handleRefresh('overview')} disabled={isRefreshing}>
+                      <RefreshCw className={`w-4 h-4 mr-2 ${isRefreshing ? 'animate-spin' : ''}`} />
+                      Refresh
                     </Button>
-                  )}
+                    {sessions.length > 0 && (
+                      <Button variant="outline" className="glass hover-glow" onClick={() => setActiveTab('models')}>
+                        Start New
+                        <ChevronRight className="w-4 h-4 ml-2" />
+                      </Button>
+                    )}
+                  </div>
                   </div>
                 
                 <div className="grid gap-4">
@@ -924,7 +997,7 @@ const StudentDashboard = () => {
                     {getCourseLeaderboard().slice(0, 3).map((entry, idx) => (
                       <div 
                         key={entry.rank}
-                        className={`flex items-center gap-3 p-3 rounded-xl glass ${user?.id === entry.id ? 'border border-primary/50' : ''}`}
+                        className={`flex items-center gap-3 p-3 rounded-xl glass ${userId === entry.id ? 'border border-primary/50' : ''}`}
                       >
                         <div className={`w-8 h-8 rounded-lg flex items-center justify-center font-bold text-sm ${
                           entry.rank === 1 ? 'bg-gradient-to-br from-amber-400 to-amber-600 text-white' :
@@ -964,6 +1037,10 @@ const StudentDashboard = () => {
                     <CardDescription className="mt-2">Choose from our curated collection</CardDescription>
                   </div>
                   <div className="flex items-center gap-2">
+                    <Button variant="outline" size="sm" className="glass" onClick={() => handleRefresh('models')} disabled={isRefreshing}>
+                      <RefreshCw className={`w-4 h-4 mr-2 ${isRefreshing ? 'animate-spin' : ''}`} />
+                      Refresh
+                    </Button>
                     <div className="glass rounded-xl px-4 py-2 flex items-center gap-2">
                       <Search className="w-4 h-4 text-muted-foreground" />
                       <input 
@@ -979,13 +1056,14 @@ const StudentDashboard = () => {
               </CardHeader>
               <CardContent>
                 <Tabs value={selectedModelCategory} onValueChange={(v) => setSelectedModelCategory(v as any)}>
-                  <TabsList className="glass mb-6 p-1 rounded-xl h-auto">
+                  <TabsList className="glass mb-6 p-1 rounded-xl h-auto flex-wrap">
                     {[
                       { value: "text", label: "Text", icon: MessageSquare },
                       { value: "image", label: "Image", icon: ImageIcon },
                       { value: "audio", label: "Audio", icon: Activity },
                       { value: "video", label: "Video", icon: Play },
-                      { value: "other", label: "Other", icon: Layers },
+                      { value: "code", label: "Code", icon: Code },
+                      { value: "multimodal", label: "Multimodal", icon: Layers },
                     ].map((cat) => (
                       <TabsTrigger 
                         key={cat.value}
@@ -1073,13 +1151,19 @@ const StudentDashboard = () => {
                     </CardTitle>
                     <CardDescription className="mt-2">Your personalized AI assistants</CardDescription>
                   </div>
-                  <Button 
-                    className="gradient-accent glow-accent btn-press font-semibold"
-                    onClick={() => setIsCreateAgentOpen(true)}
-                  >
-                    <Plus className="w-4 h-4 mr-2" />
-                    Create Agent
-                      </Button>
+                  <div className="flex items-center gap-2">
+                    <Button variant="outline" size="sm" className="glass" onClick={() => handleRefresh('agents')} disabled={isRefreshing}>
+                      <RefreshCw className={`w-4 h-4 mr-2 ${isRefreshing ? 'animate-spin' : ''}`} />
+                      Refresh
+                    </Button>
+                    <Button 
+                      className="gradient-accent glow-accent btn-press font-semibold"
+                      onClick={() => setIsCreateAgentOpen(true)}
+                    >
+                      <Plus className="w-4 h-4 mr-2" />
+                      Create Agent
+                    </Button>
+                  </div>
                 </div>
               </CardHeader>
               
@@ -1278,8 +1362,8 @@ Example: You are a friendly Python tutor. Explain concepts step-by-step with cod
                             </div>
                             
                             <div className="space-y-2 max-h-48 overflow-y-auto custom-scrollbar">
-                              {/* Existing Guardrails */}
-                              {mockGuardrails.map(g => (
+                              {/* Existing Guardrails from Backend */}
+                              {guardrailsData.map(g => (
                                 <div 
                                   key={g.id} 
                                   className={`flex items-start gap-3 p-3 rounded-xl cursor-pointer transition-all ${
@@ -1547,124 +1631,167 @@ Example: You are a friendly Python tutor. Explain concepts step-by-step with cod
 
           {/* LEADERBOARD TAB */}
           <TabsContent value="leaderboard" className="mt-6">
-            <Card className="glass-card">
-            <CardHeader>
+            <Card className="bg-white dark:bg-slate-900 shadow-lg border-0">
+              <CardHeader className="pb-4">
                 <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-                <div>
-                    <CardTitle className="text-2xl font-bold flex items-center gap-3">
-                      <div className="w-10 h-10 rounded-xl gradient-tertiary glow-tertiary flex items-center justify-center">
-                        <Trophy className="w-5 h-5 text-white" />
-                </div>
-                      Leaderboard
-                    </CardTitle>
-                    <CardDescription className="mt-2">Compare your prompt engineering skills with peers</CardDescription>
-                  </div>
                   <div className="flex items-center gap-3">
-                    {/* Leaderboard View Toggle */}
-                    <ToggleGroup type="single" value={leaderboardView} onValueChange={(v) => v && setLeaderboardView(v as any)}>
-                      <ToggleGroupItem value="institutional" className="glass data-[state=on]:gradient-primary data-[state=on]:text-white">
-                        <GraduationCap className="w-4 h-4 mr-2" />
-                        Institutional
-                  </ToggleGroupItem>
-                      <ToggleGroupItem value="course" className="glass data-[state=on]:gradient-secondary data-[state=on]:text-white">
-                        <BookOpen className="w-4 h-4 mr-2" />
-                    Course
-                  </ToggleGroupItem>
-                </ToggleGroup>
-              </div>
+                    <div className="w-10 h-10 rounded-xl bg-amber-100 dark:bg-amber-500/20 flex items-center justify-center">
+                      <Trophy className="w-5 h-5 text-amber-600 dark:text-amber-400" />
+                    </div>
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <h2 className="text-xl font-bold text-slate-800 dark:text-white">Student Leaderboard</h2>
+                        <Badge className="bg-slate-200 dark:bg-slate-700 text-slate-600 dark:text-slate-300 text-xs">
+                          {leaderboardView === "institutional" ? "Institution" : "Course"} ({leaderboardData.length})
+                        </Badge>
+                      </div>
+                      <p className="text-sm text-slate-500 dark:text-slate-400">Top performers based on prompt evaluation scores</p>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <Button 
+                      variant={leaderboardView === "institutional" ? "default" : "outline"}
+                      size="sm" 
+                      className={leaderboardView === "institutional" ? "bg-violet-600 hover:bg-violet-700 text-white" : ""}
+                      onClick={() => setLeaderboardView("institutional")}
+                    >
+                      Institution
+                    </Button>
+                    <Button 
+                      variant={leaderboardView === "course" ? "default" : "outline"}
+                      size="sm" 
+                      className={leaderboardView === "course" ? "bg-violet-600 hover:bg-violet-700 text-white" : ""}
+                      onClick={() => setLeaderboardView("course")}
+                    >
+                      Course
+                    </Button>
+                    <Button variant="outline" size="sm" onClick={() => handleRefresh('leaderboard')} disabled={isRefreshing}>
+                      <RefreshCw className={`w-4 h-4 mr-2 ${isRefreshing ? 'animate-spin' : ''}`} />
+                      Refresh
+                    </Button>
+                  </div>
                 </div>
                 
                 {/* Course selector when in course view */}
                 {leaderboardView === "course" && (
-                  <div className="mt-4 flex items-center gap-3">
-                    <Label className="text-sm text-muted-foreground">Select Course:</Label>
-                    <Select value={selectedCourse} onValueChange={setSelectedCourse}>
-                      <SelectTrigger className="glass w-64">
-                        <SelectValue placeholder="Select a course" />
+                  <div className="mt-4">
+                    <Select value={enrolledCourse?.id || ""} disabled>
+                      <SelectTrigger className="w-64 bg-white dark:bg-slate-800">
+                        <SelectValue placeholder="Select a course..." />
                       </SelectTrigger>
                       <SelectContent>
-                        <SelectItem value="all">All Courses</SelectItem>
-                        {mockEnrolledCourses.map(course => (
-                          <SelectItem key={course.id} value={course.id}>{course.title}</SelectItem>
-                        ))}
+                        {enrolledCourse && (
+                          <SelectItem value={enrolledCourse.id}>{enrolledCourse.name}</SelectItem>
+                        )}
                       </SelectContent>
                     </Select>
                   </div>
                 )}
-            </CardHeader>
-            <CardContent>
-                {/* View Info Banner */}
-                <div className="glass rounded-xl p-4 mb-4 flex items-center gap-3">
-                  <div className={`w-10 h-10 rounded-lg flex items-center justify-center ${
-                    leaderboardView === "institutional" ? "gradient-primary" : "gradient-secondary"
-                  }`}>
-                    {leaderboardView === "institutional" ? (
-                      <GraduationCap className="w-5 h-5 text-white" />
-                    ) : (
-                      <BookOpen className="w-5 h-5 text-white" />
-                    )}
-                  </div>
-                  <div>
-                    <p className="font-medium">
-                      {leaderboardView === "institutional" ? "Institutional Rankings" : "Course Rankings"}
-                    </p>
-                    <p className="text-xs text-muted-foreground">
-                      {leaderboardView === "institutional" 
-                        ? "Rankings across all courses in the institution" 
-                        : selectedCourse === "all" 
-                          ? "Rankings within all enrolled courses" 
-                          : `Rankings within ${mockEnrolledCourses.find(c => c.id === selectedCourse)?.title || "selected course"}`
-                      }
-                    </p>
-                  </div>
-                  <Badge className="ml-auto glass text-sm px-4 py-2">
-                    <Flame className="w-4 h-4 mr-2 text-orange-400" />
-                    Your Rank: #{leaderboardView === "institutional" ? stats.institutionalRank : stats.courseRank}
-                  </Badge>
-                </div>
-
-              <div className="space-y-3">
-                  {(leaderboardView === "institutional" ? getInstitutionalLeaderboard() : getCourseLeaderboard()).map((entry, idx) => (
-                    <div 
-                      key={entry.rank} 
-                      className={`glass p-5 rounded-2xl card-hover animate-scale-in ${
-                        user?.id === entry.id ? 'border border-primary/50 bg-primary/5' : ''
-                      }`}
-                      style={{ animationDelay: `${idx * 0.1}s` }}
-                    >
-                      <div className="flex items-center gap-4">
-                        <div className={`w-14 h-14 rounded-2xl flex items-center justify-center font-bold text-lg ${
-                          entry.rank === 1 ? 'bg-gradient-to-br from-amber-400 to-amber-600 text-white glow-tertiary' : 
-                          entry.rank === 2 ? 'bg-gradient-to-br from-slate-300 to-slate-500 text-white' : 
-                          entry.rank === 3 ? 'bg-gradient-to-br from-amber-600 to-amber-800 text-white' : 
-                          'glass'
-                        }`}>
-                          {entry.rank <= 3 ? <Medal className="w-6 h-6" /> : `#${entry.rank}`}
-                        </div>
-                        <div className="flex-1">
-                          <div className="flex items-center gap-2">
-                            <p className="font-semibold text-lg">{entry.name}</p>
-                            {user?.id === entry.id && (
-                              <Badge className="gradient-primary text-xs">You</Badge>
-                            )}
-                        </div>
-                          <div className="flex items-center gap-4 mt-1 text-sm text-muted-foreground">
-                            <span>{entry.sessions} sessions</span>
-                            <span>•</span>
-                            <span>{entry.tokensUsed.toLocaleString()} tokens</span>
-                      </div>
-                        </div>
-                        <div className="text-right">
-                          <div className="text-2xl font-bold text-cyan-400">{entry.avgScore}</div>
-                          <p className="text-xs text-muted-foreground">avg score</p>
-                        </div>
+              </CardHeader>
+              
+              <CardContent className="pt-0">
+                <div className="space-y-2">
+                  {leaderboardData.length === 0 ? (
+                    <div className="text-center py-12">
+                      <Trophy className="w-12 h-12 mx-auto mb-4 text-slate-300 dark:text-slate-600" />
+                      <h3 className="font-semibold text-lg mb-2 text-slate-600 dark:text-slate-400">No rankings yet</h3>
+                      <p className="text-sm text-slate-500 dark:text-slate-500">
+                        {leaderboardView === "course" && !enrolledCourse 
+                          ? "You are not enrolled in any course" 
+                          : "Start using AI models to appear on the leaderboard"}
+                      </p>
                     </div>
-                  </div>
-                ))}
-              </div>
-            </CardContent>
-          </Card>
-        </TabsContent>
+                  ) : (
+                    leaderboardData.map((entry, idx) => {
+                      const isCurrentUser = userId === entry.id;
+                      const skillLevel = entry.avgScore >= 90 ? 'Expert' : 
+                                        entry.avgScore >= 75 ? 'Advanced' : 
+                                        entry.avgScore >= 50 ? 'Proficient' : 'Beginner';
+                      const skillColor = entry.avgScore >= 90 ? 'bg-violet-100 text-violet-700 dark:bg-violet-500/20 dark:text-violet-400' : 
+                                        entry.avgScore >= 75 ? 'bg-blue-100 text-blue-700 dark:bg-blue-500/20 dark:text-blue-400' : 
+                                        entry.avgScore >= 50 ? 'bg-amber-100 text-amber-700 dark:bg-amber-500/20 dark:text-amber-400' : 
+                                        'bg-slate-100 text-slate-600 dark:bg-slate-700 dark:text-slate-400';
+                      const initials = entry.name.split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2);
+                      
+                      return (
+                        <div 
+                          key={entry.id || entry.rank} 
+                          className={`flex items-center gap-4 p-4 rounded-xl transition-colors ${
+                            isCurrentUser 
+                              ? 'bg-amber-50 dark:bg-amber-500/10 border border-amber-200 dark:border-amber-500/30' 
+                              : 'bg-slate-50 dark:bg-slate-800/50 hover:bg-slate-100 dark:hover:bg-slate-800'
+                          }`}
+                        >
+                          {/* Rank */}
+                          <div className="w-10 flex justify-center">
+                            {entry.rank === 1 ? (
+                              <div className="w-8 h-8 rounded-full bg-gradient-to-br from-amber-400 to-amber-600 flex items-center justify-center">
+                                <Trophy className="w-4 h-4 text-white" />
+                              </div>
+                            ) : entry.rank === 2 ? (
+                              <div className="w-8 h-8 rounded-full bg-gradient-to-br from-slate-300 to-slate-500 flex items-center justify-center">
+                                <Medal className="w-4 h-4 text-white" />
+                              </div>
+                            ) : entry.rank === 3 ? (
+                              <div className="w-8 h-8 rounded-full bg-gradient-to-br from-amber-600 to-amber-800 flex items-center justify-center">
+                                <Medal className="w-4 h-4 text-white" />
+                              </div>
+                            ) : (
+                              <span className="text-lg font-bold text-slate-400 dark:text-slate-500">#{entry.rank}</span>
+                            )}
+                          </div>
+                          
+                          {/* Avatar */}
+                          <div className={`w-10 h-10 rounded-full flex items-center justify-center text-sm font-semibold ${
+                            entry.rank === 1 ? 'bg-amber-100 text-amber-700 dark:bg-amber-500/20 dark:text-amber-400' :
+                            entry.rank === 2 ? 'bg-slate-200 text-slate-600 dark:bg-slate-600 dark:text-slate-300' :
+                            entry.rank === 3 ? 'bg-orange-100 text-orange-700 dark:bg-orange-500/20 dark:text-orange-400' :
+                            'bg-violet-100 text-violet-700 dark:bg-violet-500/20 dark:text-violet-400'
+                          }`}>
+                            {initials}
+                          </div>
+                          
+                          {/* Name and stats */}
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center gap-2 flex-wrap">
+                              <span className="font-semibold text-slate-800 dark:text-white">{entry.name}</span>
+                              {entry.rank <= 3 && (
+                                <Badge className="bg-amber-100 text-amber-700 dark:bg-amber-500/20 dark:text-amber-400 text-xs">
+                                  Top {entry.rank}
+                                </Badge>
+                              )}
+                              {isCurrentUser && (
+                                <span className="text-amber-600 dark:text-amber-400 text-sm font-medium">(You)</span>
+                              )}
+                            </div>
+                            <div className="flex items-center gap-3 mt-1 text-sm text-slate-500 dark:text-slate-400">
+                              <span>{entry.sessions} prompts</span>
+                              <span>•</span>
+                              <span>{entry.tokensUsed?.toLocaleString() || 0} tokens</span>
+                              <span>•</span>
+                              <Badge className={`${skillColor} text-xs font-medium`}>
+                                {skillLevel}
+                              </Badge>
+                            </div>
+                          </div>
+                          
+                          {/* Score */}
+                          <div className={`text-xl font-bold ${
+                            entry.avgScore >= 90 ? 'text-violet-600 dark:text-violet-400' :
+                            entry.avgScore >= 75 ? 'text-blue-600 dark:text-blue-400' :
+                            entry.avgScore >= 50 ? 'text-amber-600 dark:text-amber-400' :
+                            'text-slate-600 dark:text-slate-400'
+                          }`}>
+                            {entry.avgScore}%
+                          </div>
+                        </div>
+                      );
+                    })
+                  )}
+                </div>
+              </CardContent>
+            </Card>
+          </TabsContent>
 
           {/* ARTIFACTS TAB */}
           <TabsContent value="artifacts" className="mt-6">
@@ -1680,23 +1807,29 @@ Example: You are a friendly Python tutor. Explain concepts step-by-step with cod
                     </CardTitle>
                     <CardDescription className="mt-2">Your generated content</CardDescription>
                   </div>
-                  <ToggleGroup 
-                    type="single" 
-                    value={selectedArtifactType} 
-                    onValueChange={(value) => value && setSelectedArtifactType(value as any)}
-                    className="glass rounded-xl p-1"
-                  >
-                    <ToggleGroupItem value="all" className="data-[state=on]:gradient-secondary data-[state=on]:text-white rounded-lg px-4">All</ToggleGroupItem>
-                    <ToggleGroupItem value="image" className="data-[state=on]:gradient-accent data-[state=on]:text-white rounded-lg px-4">
-                      <ImageIcon className="w-4 h-4" />
-                    </ToggleGroupItem>
-                    <ToggleGroupItem value="code" className="data-[state=on]:gradient-primary data-[state=on]:text-white rounded-lg px-4">
-                      <Code className="w-4 h-4" />
-                    </ToggleGroupItem>
-                    <ToggleGroupItem value="document" className="data-[state=on]:gradient-tertiary data-[state=on]:text-white rounded-lg px-4">
-                      <FileText className="w-4 h-4" />
-                    </ToggleGroupItem>
-                  </ToggleGroup>
+                  <div className="flex items-center gap-2">
+                    <Button variant="outline" size="sm" className="glass" onClick={() => handleRefresh('artifacts')} disabled={isRefreshing}>
+                      <RefreshCw className={`w-4 h-4 mr-2 ${isRefreshing ? 'animate-spin' : ''}`} />
+                      Refresh
+                    </Button>
+                    <ToggleGroup 
+                      type="single" 
+                      value={selectedArtifactType} 
+                      onValueChange={(value) => value && setSelectedArtifactType(value as any)}
+                      className="glass rounded-xl p-1"
+                    >
+                      <ToggleGroupItem value="all" className="data-[state=on]:gradient-secondary data-[state=on]:text-white rounded-lg px-4">All</ToggleGroupItem>
+                      <ToggleGroupItem value="image" className="data-[state=on]:gradient-accent data-[state=on]:text-white rounded-lg px-4">
+                        <ImageIcon className="w-4 h-4" />
+                      </ToggleGroupItem>
+                      <ToggleGroupItem value="code" className="data-[state=on]:gradient-primary data-[state=on]:text-white rounded-lg px-4">
+                        <Code className="w-4 h-4" />
+                      </ToggleGroupItem>
+                      <ToggleGroupItem value="document" className="data-[state=on]:gradient-tertiary data-[state=on]:text-white rounded-lg px-4">
+                        <FileText className="w-4 h-4" />
+                      </ToggleGroupItem>
+                    </ToggleGroup>
+                  </div>
                 </div>
               </CardHeader>
             <CardContent>
@@ -1777,107 +1910,46 @@ Example: You are a friendly Python tutor. Explain concepts step-by-step with cod
             <div className="space-y-4">
               <div className="flex items-center justify-between">
                 <div>
-                  <h2 className="text-2xl font-bold">My Courses</h2>
+                  <h2 className="text-2xl font-bold">My Course</h2>
                   <p className="text-muted-foreground">Track your learning progress</p>
                 </div>
               </div>
-              <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-                {mockEnrolledCourses.map((course, idx) => (
+              {enrolledCourse ? (
+                <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
                   <Card 
-                    key={course.id} 
                     className="glass-card card-hover overflow-hidden group animate-scale-in"
-                    style={{ animationDelay: `${idx * 0.1}s` }}
                   >
-                    <div className={`h-1.5 w-full ${
-                      idx === 0 ? 'gradient-primary' :
-                      idx === 1 ? 'gradient-secondary' :
-                      'gradient-accent'
-                    }`} />
+                    <div className="h-1.5 w-full gradient-primary" />
                     <CardHeader>
                       <div className="flex items-start justify-between">
-                        <div className={`w-12 h-12 rounded-2xl flex items-center justify-center group-hover:scale-110 transition-transform ${
-                          idx === 0 ? 'gradient-primary glow-primary' :
-                          idx === 1 ? 'gradient-secondary glow-secondary' :
-                          'gradient-accent glow-accent'
-                        }`}>
+                        <div className="w-12 h-12 rounded-2xl flex items-center justify-center group-hover:scale-110 transition-transform gradient-primary glow-primary">
                           <BookOpen className="w-6 h-6 text-white" />
                         </div>
-                        <Badge variant="outline" className="text-xs">{course.duration}</Badge>
+                        <Badge variant="outline" className="text-xs">Enrolled</Badge>
                       </div>
-                      <CardTitle className="mt-4">{course.title}</CardTitle>
-                      <CardDescription>{course.description}</CardDescription>
+                      <CardTitle className="mt-4">{enrolledCourse.name}</CardTitle>
+                      <CardDescription>Your current enrolled course</CardDescription>
                     </CardHeader>
                     <CardContent className="space-y-4">
-                      <div className="flex items-center justify-between text-sm">
-                        <span className="text-muted-foreground">Progress</span>
-                        <span className={`font-semibold ${
-                          idx === 0 ? 'text-blue-400' :
-                          idx === 1 ? 'text-cyan-400' :
-                          'text-pink-400'
-                        }`}>{course.progress}%</span>
-                      </div>
-                      <Progress value={course.progress} className="h-2" />
                       <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                        <User className="w-4 h-4" />
-                        <span>{course.instructor}</span>
+                        <GraduationCap className="w-4 h-4" />
+                        <span>Active Enrollment</span>
                       </div>
                     </CardContent>
-              </Card>
-            ))}
-              </div>
+                  </Card>
+                </div>
+              ) : (
+                <Card className="glass-card border-dashed">
+                  <CardContent className="flex flex-col items-center justify-center py-12">
+                    <BookOpen className="w-12 h-12 text-muted-foreground mb-4" />
+                    <h3 className="text-lg font-semibold mb-2">No Course Enrolled</h3>
+                    <p className="text-sm text-muted-foreground text-center">
+                      You are not currently enrolled in any course. Please contact your administrator.
+                    </p>
+                  </CardContent>
+                </Card>
+              )}
           </div>
-        </TabsContent>
-
-          {/* ASSIGNMENTS TAB */}
-          <TabsContent value="assignments" className="mt-6">
-            <Card className="glass-card">
-              <CardHeader>
-                <CardTitle className="text-2xl font-bold flex items-center gap-3">
-                  <div className="w-10 h-10 rounded-xl gradient-tertiary glow-tertiary flex items-center justify-center">
-                    <FileText className="w-5 h-5 text-white" />
-                  </div>
-                  Assignments
-                </CardTitle>
-                <CardDescription className="mt-2">Your pending and completed tasks</CardDescription>
-              </CardHeader>
-            <CardContent>
-                <div className="space-y-3">
-                  {mockAssignments.map((assignment, idx) => (
-                    <div 
-                      key={assignment.id}
-                      className="glass p-5 rounded-2xl card-hover animate-scale-in"
-                      style={{ animationDelay: `${idx * 0.1}s` }}
-                    >
-                      <div className="flex items-center gap-4">
-                        <div className={`w-12 h-12 rounded-2xl flex items-center justify-center ${
-                          assignment.status === 'graded' ? 'gradient-success' :
-                          assignment.status === 'submitted' ? 'gradient-primary glow-primary' :
-                          'gradient-tertiary glow-tertiary'
-                        }`}>
-                          {assignment.status === 'graded' ? <CheckCircle className="w-6 h-6 text-white" /> :
-                           assignment.status === 'submitted' ? <Clock className="w-6 h-6 text-white" /> :
-                           <AlertCircle className="w-6 h-6 text-white" />}
-                        </div>
-                        <div className="flex-1">
-                          <h3 className="font-semibold text-lg">{assignment.title}</h3>
-                          <p className="text-sm text-muted-foreground">{assignment.course}</p>
-                        </div>
-                        <div className="text-right">
-                          <Badge className={`${
-                            assignment.status === 'graded' ? 'bg-emerald-500/20 text-emerald-400' :
-                            assignment.status === 'submitted' ? 'bg-blue-500/20 text-blue-400' :
-                            'bg-orange-500/20 text-orange-400'
-                          }`}>
-                            {assignment.status === 'graded' ? assignment.grade : assignment.status}
-                          </Badge>
-                          <p className="text-xs text-muted-foreground mt-1">Due: {assignment.dueDate}</p>
-                        </div>
-                      </div>
-                </div>
-              ))}
-                </div>
-            </CardContent>
-          </Card>
         </TabsContent>
         </Tabs>
 
