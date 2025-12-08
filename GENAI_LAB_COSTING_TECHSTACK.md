@@ -258,18 +258,27 @@ TOKEN PRICING MODEL
 ────────────────────────────────────────────────────────────────────
 
 Student Billing:
-  • Student pays: ₹1,500 per enrollment
+  • Student pays: ₹2,000 per enrollment
   • Displayed tokens: 50,000 tokens (virtual)
-  • Actual budget: ₹1,500 worth of API usage
+  • Actual budget: ₹1,500 worth of API usage per student
+  • Profit margin: ₹500 per student
 
 Internal Tracking:
-  • Each model has different actual API costs
+  • Each model has different actual API costs (in INR)
   • Backend tracks real ₹ spent per student
   • Deducts from ₹1,500 budget internally
   • Student sees token deduction (50,000 scale)
 
-Conversion Formula:
+Conversion Formulas:
   Virtual Tokens Used = (Actual ₹ Spent / 1500) × 50,000
+  Remaining Tokens = 50,000 - Virtual Tokens Used
+  Usage Percentage = (₹ Spent / 1500) × 100
+
+Example:
+  • Student spends ₹150 on API calls
+  • Virtual tokens used = (150 / 1500) × 50,000 = 5,000 tokens
+  • Remaining tokens = 50,000 - 5,000 = 45,000 tokens
+  • Usage = 10%
 
 
 
@@ -462,6 +471,49 @@ BACKUP & DISASTER RECOVERY
   • EC2: AMI snapshots (weekly recommended)
   • Recovery Time: < 1 hour for full restore
   • Data Durability: 99.999999999% (11 9s) on S3
+
+
+
+═══════════════════════════════════════════════════════════════════
+SECTION 7: 📈 BUSINESS METRICS
+═══════════════════════════════════════════════════════════════════
+
+REVENUE MODEL
+────────────────────────────────────────────────────────────────────
+
+Per Student:
+  • Enrollment Fee:     ₹2,000
+  • Token Allocation:   50,000 (virtual)
+  • AI API Budget:      ₹1,500 (actual)
+  • Profit Margin:      ₹500
+
+For 400 Students:
+  • Total Revenue:      ₹8,00,000
+  • Infrastructure:     ₹13,517/year
+  • AI API Costs:       ~₹4,80,000 (estimated 80% utilization)
+  • Gross Margin:       ~₹3,06,483/year
+
+
+
+COST PER STUDENT
+────────────────────────────────────────────────────────────────────
+
+Infrastructure Only:
+  • Annual Cost:        ₹13,517
+  • Per Student/Year:   ₹33.79
+  • Per Student/Month:  ₹2.82
+
+
+
+BREAK-EVEN ANALYSIS
+────────────────────────────────────────────────────────────────────
+
+Minimum Students to Cover Infrastructure:
+  ₹13,517 ÷ ₹2,000 = 7 students/year
+
+At 400 Students:
+  Infrastructure ROI = 59x return
+
 
 
 

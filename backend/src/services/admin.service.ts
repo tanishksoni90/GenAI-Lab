@@ -1076,6 +1076,62 @@ export const getAllModelsAdmin = async () => {
   });
 };
 
+interface CreateModelInput {
+  name: string;
+  provider: string;
+  modelId: string;
+  category: string;
+  description?: string;
+  inputCost?: number;
+  outputCost?: number;
+  maxTokens?: number;
+  isActive?: boolean;
+}
+
+// Create a new AI model
+export const createModel = async (input: CreateModelInput) => {
+  // Check if model already exists
+  const existing = await prisma.aIModel.findUnique({
+    where: { provider_modelId: { provider: input.provider, modelId: input.modelId } },
+  });
+  
+  if (existing) {
+    throw new ConflictError('A model with this provider and model ID already exists');
+  }
+  
+  return prisma.aIModel.create({
+    data: {
+      name: input.name,
+      provider: input.provider,
+      modelId: input.modelId,
+      category: input.category,
+      description: input.description || null,
+      inputCost: input.inputCost || 0,
+      outputCost: input.outputCost || 0,
+      maxTokens: input.maxTokens || 4096,
+      isActive: input.isActive ?? false, // Default to inactive
+    },
+  });
+};
+
+// Delete a model
+export const deleteModel = async (modelId: string) => {
+  const model = await prisma.aIModel.findUnique({ where: { id: modelId } });
+  
+  if (!model) {
+    throw new NotFoundError('Model not found');
+  }
+  
+  // Check if model has sessions
+  const sessionCount = await prisma.session.count({ where: { modelId } });
+  if (sessionCount > 0) {
+    throw new BadRequestError(`Cannot delete model with ${sessionCount} existing sessions. Deactivate it instead.`);
+  }
+  
+  await prisma.aIModel.delete({ where: { id: modelId } });
+  return { message: 'Model deleted successfully' };
+};
+
 interface UpdateModelInput {
   isActive?: boolean;
   maxTokens?: number;

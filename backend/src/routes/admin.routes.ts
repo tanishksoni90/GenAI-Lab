@@ -95,6 +95,20 @@ const modelAccessSchema = z.object({
   }),
 });
 
+const createModelSchema = z.object({
+  body: z.object({
+    name: z.string().min(1, 'Model name is required'),
+    provider: z.string().min(1, 'Provider is required'),
+    modelId: z.string().min(1, 'Model ID is required'),
+    category: z.enum(['text', 'image', 'audio', 'video', 'code', 'multimodal']),
+    description: z.string().optional(),
+    inputCost: z.number().min(0).optional(),
+    outputCost: z.number().min(0).optional(),
+    maxTokens: z.number().min(1).optional(),
+    isActive: z.boolean().optional(),
+  }),
+});
+
 const updateSettingsSchema = z.object({
   body: z.object({
     // Token settings
@@ -156,7 +170,9 @@ router.delete('/guardrails/:id', adminController.deleteGuardrail);
 // ==================== AI MODELS (ADMIN) ====================
 
 router.get('/models', adminController.getAllModels);
+router.post('/models', validate(createModelSchema), adminController.createModel);
 router.put('/models/:modelId', adminController.updateModel);
+router.delete('/models/:modelId', adminController.deleteModel);
 router.post('/models/:modelId/toggle', adminController.toggleModelActive);
 router.post('/models/:modelId/test', adminController.testModel);
 

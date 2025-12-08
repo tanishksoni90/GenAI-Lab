@@ -1,6 +1,7 @@
 // API Client for GenAI Lab Backend
 
-const API_BASE_URL = 'http://localhost:3001/api';
+// Use environment variable for production, fallback to localhost for development
+const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:3001/api';
 
 // Types for API responses
 interface ApiResponse<T> {
@@ -22,26 +23,46 @@ interface PaginatedResponse<T> {
   };
 }
 
-// Get stored auth token
+// Get the current auth role from URL or stored value
+const getCurrentAuthRole = (): 'admin' | 'student' => {
+  // Check URL path first
+  if (window.location.pathname.startsWith('/admin')) {
+    return 'admin';
+  }
+  // Fallback to stored role or default to student
+  return (localStorage.getItem('currentAuthRole') as 'admin' | 'student') || 'student';
+};
+
+// Set the current auth role
+export const setCurrentAuthRole = (role: 'admin' | 'student') => {
+  localStorage.setItem('currentAuthRole', role);
+};
+
+// Get stored auth token (role-specific)
 const getToken = (): string | null => {
-  return localStorage.getItem('accessToken');
+  const role = getCurrentAuthRole();
+  return localStorage.getItem(`${role}_accessToken`);
 };
 
-// Get refresh token
+// Get refresh token (role-specific)
 const getRefreshToken = (): string | null => {
-  return localStorage.getItem('refreshToken');
+  const role = getCurrentAuthRole();
+  return localStorage.getItem(`${role}_refreshToken`);
 };
 
-// Save tokens
-const saveTokens = (accessToken: string, refreshToken: string) => {
-  localStorage.setItem('accessToken', accessToken);
-  localStorage.setItem('refreshToken', refreshToken);
+// Save tokens (role-specific)
+const saveTokens = (accessToken: string, refreshToken: string, role?: 'admin' | 'student') => {
+  const authRole = role || getCurrentAuthRole();
+  localStorage.setItem(`${authRole}_accessToken`, accessToken);
+  localStorage.setItem(`${authRole}_refreshToken`, refreshToken);
+  setCurrentAuthRole(authRole);
 };
 
-// Clear tokens
-const clearTokens = () => {
-  localStorage.removeItem('accessToken');
-  localStorage.removeItem('refreshToken');
+// Clear tokens (role-specific)
+const clearTokens = (role?: 'admin' | 'student') => {
+  const authRole = role || getCurrentAuthRole();
+  localStorage.removeItem(`${authRole}_accessToken`);
+  localStorage.removeItem(`${authRole}_refreshToken`);
 };
 
 // Refresh access token
@@ -58,6 +79,7 @@ const onTokenRefreshed = (token: string) => {
 };
 
 const refreshAccessToken = async (): Promise<string | null> => {
+  const role = getCurrentAuthRole();
   const refreshToken = getRefreshToken();
   if (!refreshToken) return null;
 
@@ -69,18 +91,18 @@ const refreshAccessToken = async (): Promise<string | null> => {
     });
 
     if (!response.ok) {
-      clearTokens();
+      clearTokens(role);
       return null;
     }
 
     const data = await response.json();
     if (data.success && data.data?.tokens) {
-      saveTokens(data.data.tokens.accessToken, data.data.tokens.refreshToken);
+      saveTokens(data.data.tokens.accessToken, data.data.tokens.refreshToken, role);
       return data.data.tokens.accessToken;
     }
     return null;
   } catch {
-    clearTokens();
+    clearTokens(role);
     return null;
   }
 };
@@ -122,9 +144,10 @@ async function apiRequest<T>(
         // Retry the original request with new token
         return apiRequest<T>(endpoint, options, retryCount + 1);
       } else {
-        // Refresh failed - redirect to login
-        clearTokens();
-        window.location.href = '/admin/signin';
+        // Refresh failed - redirect to login based on role
+        const role = getCurrentAuthRole();
+        clearTokens(role);
+        window.location.href = role === 'admin' ? '/admin/signin' : '/';
         throw new ApiError('Session expired. Please login again.', 401);
       }
     } else {
@@ -877,10 +900,31 @@ export const adminApi = {
   getAllModels: () =>
     apiRequest<ApiResponse<{ models: any[] }>>('/admin/models'),
 
+  createModel: (data: {
+    name: string;
+    provider: string;
+    modelId: string;
+    category: string;
+    description?: string;
+    inputCost?: number;
+    outputCost?: number;
+    maxTokens?: number;
+    isActive?: boolean;
+  }) =>
+    apiRequest<ApiResponse<{ model: any }>>('/admin/models', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+
   updateModel: (modelId: string, data: { isActive?: boolean; maxTokens?: number; description?: string }) =>
     apiRequest<ApiResponse<any>>(`/admin/models/${modelId}`, {
       method: 'PUT',
       body: JSON.stringify(data),
+    }),
+
+  deleteModel: (modelId: string) =>
+    apiRequest<ApiResponse<{ message: string }>>(`/admin/models/${modelId}`, {
+      method: 'DELETE',
     }),
 
   toggleModelActive: (modelId: string) =>

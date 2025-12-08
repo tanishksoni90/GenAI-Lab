@@ -53,6 +53,8 @@ import {
   useUpdateAPIKey,
   useTestAPIKey,
   useDeleteAPIKey,
+  useCreateModel,
+  useDeleteModel,
   useToggleModelActive,
   useTestModel,
   useUpdateModel,
@@ -92,10 +94,23 @@ const AdminDashboard = () => {
   const [showImportDialog, setShowImportDialog] = useState(false);
   const [showConfigureApiKeyDialog, setShowConfigureApiKeyDialog] = useState(false);
   const [showEditGuardrailDialog, setShowEditGuardrailDialog] = useState(false);
+  const [showAddModelDialog, setShowAddModelDialog] = useState(false);
+  const [deleteModelId, setDeleteModelId] = useState<string | null>(null);
   const [configureModelId, setConfigureModelId] = useState<string | null>(null);
   const [accessModelId, setAccessModelId] = useState<string | null>(null);
   const [modelConfig, setModelConfig] = useState({ maxTokens: 4096, description: "" });
   const [modelAccessForm, setModelAccessForm] = useState({ courseId: "", batchId: "", studentIds: "" });
+  const [newModel, setNewModel] = useState({
+    name: "",
+    provider: "",
+    modelId: "",
+    category: "text",
+    description: "",
+    inputCost: 0,
+    outputCost: 0,
+    maxTokens: 4096,
+    isActive: false,
+  });
   
   // Filter states
   const [studentSearchQuery, setStudentSearchQuery] = useState("");
@@ -162,6 +177,8 @@ const AdminDashboard = () => {
   const updateApiKeyMutation = useUpdateAPIKey();
   const testApiKeyMutation = useTestAPIKey();
   const deleteApiKeyMutation = useDeleteAPIKey();
+  const createModelMutation = useCreateModel();
+  const deleteModelMutation = useDeleteModel();
   const toggleModelMutation = useToggleModelActive();
   const testModelMutation = useTestModel();
   const updateModelMutation = useUpdateModel();
@@ -1785,13 +1802,187 @@ const AdminDashboard = () => {
                 <p className="text-sm text-muted-foreground">Configure and manage AI models for your institution</p>
               </div>
               <div className="flex items-center gap-2">
-                <p className="text-sm text-muted-foreground">Models are globally available.</p>
                 <Button variant="outline" className="glass" onClick={() => handleRefresh('models')} disabled={isRefreshing}>
                   <RefreshCw className={`w-4 h-4 mr-2 ${isRefreshing ? 'animate-spin' : ''}`} />
                   Refresh
                 </Button>
+                <Button className="gradient-primary glow-primary" onClick={() => setShowAddModelDialog(true)}>
+                  <Plus className="w-4 h-4 mr-2" />
+                  Add Model
+                </Button>
               </div>
             </div>
+
+            {/* Add Model Dialog */}
+            <Dialog open={showAddModelDialog} onOpenChange={setShowAddModelDialog}>
+              <DialogContent className="glass-card border-white/10 max-w-xl">
+                <DialogHeader>
+                  <DialogTitle>Add New AI Model</DialogTitle>
+                  <DialogDescription>Add a new AI model to the platform. Models are inactive by default.</DialogDescription>
+                </DialogHeader>
+                <div className="space-y-4 py-4 max-h-[60vh] overflow-y-auto">
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className="space-y-2">
+                      <Label>Model Name *</Label>
+                      <Input 
+                        placeholder="e.g., GPT-4 Turbo" 
+                        className="glass"
+                        value={newModel.name}
+                        onChange={(e) => setNewModel({ ...newModel, name: e.target.value })}
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label>Provider *</Label>
+                      <Select value={newModel.provider} onValueChange={(v) => setNewModel({ ...newModel, provider: v })}>
+                        <SelectTrigger className="glass"><SelectValue placeholder="Select provider" /></SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="OpenAI">OpenAI</SelectItem>
+                          <SelectItem value="Anthropic">Anthropic</SelectItem>
+                          <SelectItem value="Google">Google</SelectItem>
+                          <SelectItem value="Groq">Groq</SelectItem>
+                          <SelectItem value="Mistral">Mistral</SelectItem>
+                          <SelectItem value="Meta">Meta</SelectItem>
+                          <SelectItem value="Deepseek">Deepseek</SelectItem>
+                          <SelectItem value="ElevenLabs">ElevenLabs</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className="space-y-2">
+                      <Label>Model ID *</Label>
+                      <Input 
+                        placeholder="e.g., gpt-4-turbo" 
+                        className="glass font-mono text-sm"
+                        value={newModel.modelId}
+                        onChange={(e) => setNewModel({ ...newModel, modelId: e.target.value })}
+                      />
+                      <p className="text-xs text-muted-foreground">The API identifier for this model</p>
+                    </div>
+                    <div className="space-y-2">
+                      <Label>Category *</Label>
+                      <Select value={newModel.category} onValueChange={(v) => setNewModel({ ...newModel, category: v })}>
+                        <SelectTrigger className="glass"><SelectValue /></SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="text">Text</SelectItem>
+                          <SelectItem value="image">Image</SelectItem>
+                          <SelectItem value="audio">Audio</SelectItem>
+                          <SelectItem value="video">Video</SelectItem>
+                          <SelectItem value="code">Code</SelectItem>
+                          <SelectItem value="multimodal">Multimodal</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  </div>
+                  <div className="space-y-2">
+                    <Label>Description</Label>
+                    <Textarea 
+                      placeholder="Brief description of the model capabilities..." 
+                      className="glass"
+                      rows={2}
+                      value={newModel.description}
+                      onChange={(e) => setNewModel({ ...newModel, description: e.target.value })}
+                    />
+                  </div>
+                  {/* Cost info hint */}
+                  <div className="p-3 glass rounded-lg text-xs text-muted-foreground">
+                    💡 <span className="font-medium">Pricing Guide:</span> {
+                      newModel.category === 'audio' 
+                        ? 'Audio models are typically priced per minute of audio. Only one cost field is needed.' 
+                        : newModel.category === 'video' 
+                          ? 'Video models are typically priced per second of video. Only one cost field is needed.'
+                          : newModel.category === 'image' 
+                            ? 'Image models are priced per image generated. Only one cost field is needed.'
+                            : 'Text/Code/Multimodal models are priced per million tokens for both input and output separately.'
+                    }
+                  </div>
+                  <div className="grid grid-cols-3 gap-4">
+                    <div className="space-y-2">
+                      <Label>
+                        {newModel.category === 'audio' 
+                          ? 'Cost (per minute)' 
+                          : newModel.category === 'video' 
+                            ? 'Cost (per second)' 
+                            : newModel.category === 'image' 
+                              ? 'Cost (per image)' 
+                              : 'Input Cost (per 1M tokens)'}
+                      </Label>
+                      <Input 
+                        type="number" 
+                        step="0.001"
+                        placeholder="0.00" 
+                        className="glass"
+                        value={newModel.inputCost}
+                        onChange={(e) => setNewModel({ ...newModel, inputCost: parseFloat(e.target.value) || 0 })}
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label>
+                        {newModel.category === 'audio' || newModel.category === 'video' || newModel.category === 'image'
+                          ? 'N/A' 
+                          : 'Output Cost (per 1M tokens)'}
+                      </Label>
+                      <Input 
+                        type="number" 
+                        step="0.001"
+                        placeholder="0.00" 
+                        className="glass"
+                        disabled={newModel.category === 'image' || newModel.category === 'audio' || newModel.category === 'video'}
+                        value={newModel.category === 'image' || newModel.category === 'audio' || newModel.category === 'video' ? 0 : newModel.outputCost}
+                        onChange={(e) => setNewModel({ ...newModel, outputCost: parseFloat(e.target.value) || 0 })}
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label>
+                        {newModel.category === 'video' 
+                          ? 'Max Duration (sec)' 
+                          : newModel.category === 'audio'
+                            ? 'Max Duration (min)'
+                            : newModel.category === 'image' 
+                              ? 'Max Images/Request' 
+                              : 'Max Tokens'}
+                      </Label>
+                      <Input 
+                        type="number" 
+                        placeholder={newModel.category === 'image' ? "4" : newModel.category === 'audio' ? "60" : newModel.category === 'video' ? "60" : "4096"}
+                        className="glass"
+                        value={newModel.maxTokens}
+                        onChange={(e) => setNewModel({ ...newModel, maxTokens: parseInt(e.target.value) || 4096 })}
+                      />
+                    </div>
+                  </div>
+                  <div className="flex items-center justify-between p-3 glass rounded-lg">
+                    <div>
+                      <Label>Activate Immediately</Label>
+                      <p className="text-xs text-muted-foreground">Make this model available to students right away</p>
+                    </div>
+                    <Switch 
+                      checked={newModel.isActive}
+                      onCheckedChange={(checked) => setNewModel({ ...newModel, isActive: checked })}
+                    />
+                  </div>
+                </div>
+                <DialogFooter>
+                  <Button variant="outline" className="glass" onClick={() => setShowAddModelDialog(false)}>Cancel</Button>
+                  <Button 
+                    className="gradient-primary"
+                    onClick={() => {
+                      if (!newModel.name || !newModel.provider || !newModel.modelId) {
+                        toast({ title: "Error", description: "Please fill in all required fields", variant: "destructive" });
+                        return;
+                      }
+                      createModelMutation.mutate(newModel);
+                      setShowAddModelDialog(false);
+                      setNewModel({ name: "", provider: "", modelId: "", category: "text", description: "", inputCost: 0, outputCost: 0, maxTokens: 4096, isActive: false });
+                    }}
+                    disabled={createModelMutation.isPending}
+                  >
+                    {createModelMutation.isPending ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Plus className="w-4 h-4 mr-2" />}
+                    Add Model
+                  </Button>
+                </DialogFooter>
+              </DialogContent>
+            </Dialog>
 
             {/* Category Tabs */}
             <div className="glass rounded-xl p-1 inline-flex gap-1">
@@ -1868,9 +2059,19 @@ const AdminDashboard = () => {
                           <p className="text-xs text-muted-foreground">{model.provider}</p>
                         </div>
                       </div>
-                      <Badge className={model.isActive ? "bg-emerald-500/20 text-emerald-400" : "bg-orange-500/20 text-orange-400"}>
-                        {model.isActive ? "Active" : "Inactive"}
-                      </Badge>
+                      <div className="flex items-center gap-2">
+                        <Badge className={model.isActive ? "bg-emerald-500/20 text-emerald-400" : "bg-orange-500/20 text-orange-400"}>
+                          {model.isActive ? "Active" : "Inactive"}
+                        </Badge>
+                        <Button 
+                          variant="ghost" 
+                          size="sm" 
+                          className="h-7 w-7 p-0 text-red-400 hover:text-red-400 hover:bg-red-400/10"
+                          onClick={() => setDeleteModelId(model.id)}
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </Button>
+                      </div>
                     </div>
 
                     <p className="text-sm text-muted-foreground mb-3">{model.description || "No description"}</p>
@@ -2089,6 +2290,33 @@ const AdminDashboard = () => {
                 </div>
               )}
             </div>
+
+            {/* Delete Model Confirmation Dialog */}
+            <AlertDialog open={!!deleteModelId} onOpenChange={(open) => !open && setDeleteModelId(null)}>
+              <AlertDialogContent className="glass-card border-white/10">
+                <AlertDialogHeader>
+                  <AlertDialogTitle>Delete AI Model?</AlertDialogTitle>
+                  <AlertDialogDescription>
+                    This will permanently remove this model from the platform. Models with existing sessions cannot be deleted - deactivate them instead. This action cannot be undone.
+                  </AlertDialogDescription>
+                </AlertDialogHeader>
+                <AlertDialogFooter>
+                  <AlertDialogCancel className="glass">Cancel</AlertDialogCancel>
+                  <AlertDialogAction 
+                    className="bg-red-500 hover:bg-red-600"
+                    onClick={() => {
+                      if (deleteModelId) {
+                        deleteModelMutation.mutate(deleteModelId);
+                        setDeleteModelId(null);
+                      }
+                    }}
+                  >
+                    {deleteModelMutation.isPending ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Trash2 className="w-4 h-4 mr-2" />}
+                    Delete Model
+                  </AlertDialogAction>
+                </AlertDialogFooter>
+              </AlertDialogContent>
+            </AlertDialog>
           </TabsContent>
 
           {/* API KEYS TAB */}

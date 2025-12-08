@@ -29,7 +29,8 @@ export function useAdminStudents(params?: {
   return useQuery({
     queryKey: adminKeys.studentsList(params),
     queryFn: () => adminApi.getStudents(params),
-    staleTime: 30000, // 30 seconds
+    staleTime: 0, // Always fetch fresh data
+    refetchOnWindowFocus: false,
   });
 }
 
@@ -38,6 +39,7 @@ export function useAdminStudent(id: string) {
     queryKey: adminKeys.student(id),
     queryFn: () => adminApi.getStudent(id),
     enabled: !!id,
+    staleTime: 0, // Always fetch fresh data
   });
 }
 
@@ -418,6 +420,64 @@ export function useDeleteAPIKey() {
 }
 
 // ==================== MODEL MANAGEMENT HOOKS ====================
+
+export function useCreateModel() {
+  const queryClient = useQueryClient();
+  const { toast } = useToast();
+
+  return useMutation({
+    mutationFn: (data: {
+      name: string;
+      provider: string;
+      modelId: string;
+      category: string;
+      description?: string;
+      inputCost?: number;
+      outputCost?: number;
+      maxTokens?: number;
+      isActive?: boolean;
+    }) => adminApi.createModel(data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['admin', 'models'] });
+      queryClient.invalidateQueries({ queryKey: ['models'] });
+      toast({
+        title: 'Model Created',
+        description: 'New AI model has been added',
+      });
+    },
+    onError: (error: Error) => {
+      toast({
+        title: 'Create Failed',
+        description: error.message || 'Failed to create model',
+        variant: 'destructive',
+      });
+    },
+  });
+}
+
+export function useDeleteModel() {
+  const queryClient = useQueryClient();
+  const { toast } = useToast();
+
+  return useMutation({
+    mutationFn: (modelId: string) => adminApi.deleteModel(modelId),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['admin', 'models'] });
+      queryClient.invalidateQueries({ queryKey: ['models'] });
+      toast({
+        title: 'Model Deleted',
+        description: 'AI model has been removed',
+      });
+    },
+    onError: (error: Error) => {
+      toast({
+        title: 'Delete Failed',
+        description: error.message || 'Failed to delete model',
+        variant: 'destructive',
+      });
+    },
+  });
+}
 
 export function useUpdateModel() {
   const queryClient = useQueryClient();

@@ -143,8 +143,15 @@ export const useLeaderboard = (type: 'institutional' | 'course', courseId?: stri
     queryKey: ['leaderboard', type, courseId],
     queryFn: async () => {
       const response = await studentApi.getLeaderboard(type, courseId);
-      return response.data.leaderboard;
+      if (response.data?.leaderboard) {
+        return response.data.leaderboard;
+      }
+      return [];
     },
+    // For institutional, always enabled. For course, only when courseId is available
+    enabled: type === 'institutional' || !!courseId,
+    staleTime: 30000, // 30 seconds
+    retry: 1,
   });
 };
 

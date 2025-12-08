@@ -256,6 +256,25 @@ export const getAllModels = async (req: Request, res: Response, next: NextFuncti
   }
 };
 
+export const createModel = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const model = await adminService.createModel(req.body);
+    return sendSuccess(res, { model }, 201);
+  } catch (error) {
+    next(error);
+  }
+};
+
+export const deleteModel = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { modelId } = req.params;
+    const result = await adminService.deleteModel(modelId);
+    return sendSuccess(res, result);
+  } catch (error) {
+    next(error);
+  }
+};
+
 export const updateModel = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { modelId } = req.params;

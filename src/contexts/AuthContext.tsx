@@ -1,6 +1,6 @@
 import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
-import { authApi, User, AuthTokens, LoginCredentials, RegisterData, ApiError } from '@/lib/api';
-import { useNavigate } from 'react-router-dom';
+import { authApi, User, AuthTokens, LoginCredentials, RegisterData, ApiError, setCurrentAuthRole } from '@/lib/api';
+import { useNavigate, useLocation } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
 
 interface AuthContextType {
@@ -33,46 +33,98 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
   const [user, setUser] = useState<User | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [migrationDone, setMigrationDone] = useState(false);
   const navigate = useNavigate();
+  const location = useLocation();
   const queryClient = useQueryClient();
 
-  // Store tokens in localStorage
-  const saveTokens = (tokens: AuthTokens) => {
-    localStorage.setItem('accessToken', tokens.accessToken);
-    localStorage.setItem('refreshToken', tokens.refreshToken);
+  // Store tokens in localStorage (role-specific)
+  const saveTokens = (tokens: AuthTokens, role: 'admin' | 'student') => {
+    localStorage.setItem(`${role}_accessToken`, tokens.accessToken);
+    localStorage.setItem(`${role}_refreshToken`, tokens.refreshToken);
+    setCurrentAuthRole(role);
   };
 
-  // Clear tokens from localStorage
-  const clearTokens = () => {
-    localStorage.removeItem('accessToken');
-    localStorage.removeItem('refreshToken');
+  // Clear tokens from localStorage (role-specific)
+  const clearTokens = (role: 'admin' | 'student') => {
+    localStorage.removeItem(`${role}_accessToken`);
+    localStorage.removeItem(`${role}_refreshToken`);
   };
 
-  // Check if user is authenticated on mount
+  // Determine if path is for admin or student
+  const isAdminPath = location.pathname.startsWith('/admin');
+
+  // Migrate old token format to new role-specific format (one-time migration)
+  // This runs FIRST before auth check
   useEffect(() => {
+    const migrateTokens = () => {
+      const oldAccessToken = localStorage.getItem('accessToken');
+      const oldRefreshToken = localStorage.getItem('refreshToken');
+      
+      if (oldAccessToken && oldRefreshToken) {
+        try {
+          // Decode JWT to get the role (JWT payload is base64 encoded)
+          const payload = JSON.parse(atob(oldAccessToken.split('.')[1]));
+          const tokenRole = payload.role as 'admin' | 'student';
+          
+          // Only migrate if new format doesn't already exist
+          if (!localStorage.getItem(`${tokenRole}_accessToken`)) {
+            localStorage.setItem(`${tokenRole}_accessToken`, oldAccessToken);
+            localStorage.setItem(`${tokenRole}_refreshToken`, oldRefreshToken);
+          }
+        } catch (e) {
+          // If decoding fails, just clear old tokens
+        }
+        
+        // Remove old format tokens
+        localStorage.removeItem('accessToken');
+        localStorage.removeItem('refreshToken');
+      }
+      setMigrationDone(true);
+    };
+    
+    migrateTokens();
+  }, []);
+
+  // Check if user is authenticated on mount and when path changes between admin/student
+  useEffect(() => {
+    // Wait for migration to complete
+    if (!migrationDone) return;
+
     const initAuth = async () => {
-      const token = localStorage.getItem('accessToken');
+      setIsLoading(true);
+      const role = isAdminPath ? 'admin' : 'student';
+      const token = localStorage.getItem(`${role}_accessToken`);
+      
       if (token) {
         try {
+          // Set the role for API calls
+          setCurrentAuthRole(role);
           const response = await authApi.getProfile();
           setUser(response.data.user);
         } catch (err) {
           // Token invalid or expired
-          clearTokens();
+          clearTokens(role);
+          setUser(null);
         }
+      } else {
+        setUser(null);
       }
       setIsLoading(false);
     };
 
     initAuth();
-  }, []);
+  }, [migrationDone, isAdminPath]);
 
   const login = useCallback(async (credentials: LoginCredentials) => {
     setIsLoading(true);
     setError(null);
     try {
       const response = await authApi.login(credentials);
-      saveTokens(response.data.tokens);
+      const userRole = response.data.user.role as 'admin' | 'student';
+      
+      // Save tokens with the user's actual role
+      saveTokens(response.data.tokens, userRole);
       
       // Clear ALL cached data from previous user before setting new user
       queryClient.clear();
@@ -80,7 +132,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
       setUser(response.data.user);
       
       // Navigate based on role
-      if (response.data.user.role === 'admin') {
+      if (userRole === 'admin') {
         navigate('/admin/dashboard');
       } else {
         navigate('/student/dashboard');
@@ -95,14 +147,15 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     } finally {
       setIsLoading(false);
     }
-  }, [navigate]);
+  }, [navigate, queryClient]);
 
   const register = useCallback(async (data: RegisterData) => {
     setIsLoading(true);
     setError(null);
     try {
       const response = await authApi.register(data);
-      saveTokens(response.data.tokens);
+      // Students register, so always use 'student' role
+      saveTokens(response.data.tokens, 'student');
       
       // Clear ALL cached data before setting new user
       queryClient.clear();
@@ -119,15 +172,25 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     } finally {
       setIsLoading(false);
     }
-  }, [navigate]);
+  }, [navigate, queryClient]);
 
   const logout = useCallback(() => {
-    clearTokens();
+    // Get user role before clearing
+    const wasAdmin = user?.role === 'admin';
+    const role = wasAdmin ? 'admin' : 'student';
+    
+    clearTokens(role);
     setUser(null);
     // Clear ALL cached data on logout
     queryClient.clear();
-    navigate('/');
-  }, [navigate, queryClient]);
+    
+    // Redirect based on role
+    if (wasAdmin) {
+      navigate('/admin/signin');
+    } else {
+      navigate('/');
+    }
+  }, [navigate, queryClient, user?.role]);
 
   const refreshUser = useCallback(async () => {
     try {
