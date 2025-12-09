@@ -62,6 +62,9 @@ export const config = {
     // USD to INR conversion rate (update periodically)
     usdToInr: 84,
   },
+  
+  // Default token quota for new students (virtual tokens)
+  defaultTokenQuota: 50000,
 };
 
 // Helper functions for token/budget conversion

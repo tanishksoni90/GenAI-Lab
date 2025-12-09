@@ -1,6 +1,43 @@
 import { prisma } from '../lib/prisma';
 import { config } from '../config';
 import { NotFoundError, BadRequestError } from '../utils/errors';
+import OpenAI from 'openai';
+import Anthropic from '@anthropic-ai/sdk';
+import { GoogleGenerativeAI } from '@google/generative-ai';
+
+// Initialize AI clients (lazy initialization)
+let openaiClient: OpenAI | null = null;
+let anthropicClient: Anthropic | null = null;
+let googleClient: GoogleGenerativeAI | null = null;
+
+const getOpenAIClient = (): OpenAI | null => {
+  if (!config.ai.openai.apiKey) return null;
+  if (!openaiClient) {
+    openaiClient = new OpenAI({
+      apiKey: config.ai.openai.apiKey,
+      baseURL: config.ai.openai.baseUrl,
+    });
+  }
+  return openaiClient;
+};
+
+const getAnthropicClient = (): Anthropic | null => {
+  if (!config.ai.anthropic.apiKey) return null;
+  if (!anthropicClient) {
+    anthropicClient = new Anthropic({
+      apiKey: config.ai.anthropic.apiKey,
+    });
+  }
+  return anthropicClient;
+};
+
+const getGoogleClient = (): GoogleGenerativeAI | null => {
+  if (!config.ai.google.apiKey) return null;
+  if (!googleClient) {
+    googleClient = new GoogleGenerativeAI(config.ai.google.apiKey);
+  }
+  return googleClient;
+};
 
 // Check if real API keys are configured
 const hasRealApiKey = (provider: string): boolean => {
@@ -89,6 +126,176 @@ const generateMockResponse = (
   };
 };
 
+// ==================== REAL API IMPLEMENTATIONS ====================
+
+// OpenAI API call (GPT models and DALL-E)
+const callOpenAI = async (
+  modelId: string,
+  prompt: string,
+  conversationHistory: Array<{ role: string; content: string }>,
+  category: string
+): Promise<{ content: string; tokensUsed: number }> => {
+  const client = getOpenAIClient();
+  if (!client) {
+    throw new BadRequestError('OpenAI API key not configured');
+  }
+
+  // Handle image generation (DALL-E)
+  if (category === 'image') {
+    const response = await client.images.generate({
+      model: modelId,
+      prompt: prompt,
+      n: 1,
+      size: '1024x1024',
+    });
+    
+    const imageData = response.data?.[0];
+    const imageUrl = imageData?.url || imageData?.b64_json || '';
+    return {
+      content: `![Generated Image](${imageUrl})\n\n*Image generated using ${modelId}*`,
+      tokensUsed: 1000, // DALL-E has fixed per-image cost
+    };
+  }
+
+  // Handle text/chat models
+  const messages: OpenAI.Chat.ChatCompletionMessageParam[] = [
+    ...conversationHistory.map(msg => ({
+      role: msg.role as 'user' | 'assistant' | 'system',
+      content: msg.content,
+    })),
+    { role: 'user' as const, content: prompt },
+  ];
+
+  const response = await client.chat.completions.create({
+    model: modelId,
+    messages,
+    max_tokens: 2048,
+  });
+
+  const content = response.choices[0]?.message?.content || '';
+  const tokensUsed = response.usage?.total_tokens || 
+    Math.ceil(prompt.length / 4) + Math.ceil(content.length / 4);
+
+  return { content, tokensUsed };
+};
+
+// Anthropic API call (Claude models)
+const callAnthropic = async (
+  modelId: string,
+  prompt: string,
+  conversationHistory: Array<{ role: string; content: string }>
+): Promise<{ content: string; tokensUsed: number }> => {
+  const client = getAnthropicClient();
+  if (!client) {
+    throw new BadRequestError('Anthropic API key not configured');
+  }
+
+  // Convert history to Anthropic format
+  const messages: Anthropic.MessageParam[] = [
+    ...conversationHistory.map(msg => ({
+      role: msg.role as 'user' | 'assistant',
+      content: msg.content,
+    })),
+    { role: 'user' as const, content: prompt },
+  ];
+
+  const response = await client.messages.create({
+    model: modelId,
+    max_tokens: 2048,
+    messages,
+  });
+
+  const content = response.content[0]?.type === 'text' 
+    ? response.content[0].text 
+    : '';
+  
+  const tokensUsed = (response.usage?.input_tokens || 0) + (response.usage?.output_tokens || 0);
+
+  return { content, tokensUsed };
+};
+
+// Google AI API call (Gemini models)
+const callGoogle = async (
+  modelId: string,
+  prompt: string,
+  conversationHistory: Array<{ role: string; content: string }>
+): Promise<{ content: string; tokensUsed: number }> => {
+  const client = getGoogleClient();
+  if (!client) {
+    throw new BadRequestError('Google AI API key not configured');
+  }
+
+  const model = client.getGenerativeModel({ model: modelId });
+
+  // Build conversation history for Gemini
+  const history = conversationHistory.map(msg => ({
+    role: msg.role === 'assistant' ? 'model' : 'user',
+    parts: [{ text: msg.content }],
+  }));
+
+  // Start chat with history
+  const chat = model.startChat({
+    history: history as any,
+  });
+
+  const result = await chat.sendMessage(prompt);
+  const response = await result.response;
+  const content = response.text();
+
+  // Estimate tokens (Gemini doesn't always return usage)
+  const tokensUsed = Math.ceil(prompt.length / 4) + Math.ceil(content.length / 4);
+
+  return { content, tokensUsed };
+};
+
+// ElevenLabs API call (Text-to-Speech)
+const callElevenLabs = async (
+  modelId: string,
+  text: string
+): Promise<{ content: string; tokensUsed: number }> => {
+  const apiKey = config.ai.elevenlabs.apiKey;
+  if (!apiKey) {
+    throw new BadRequestError('ElevenLabs API key not configured');
+  }
+
+  // Default voice ID (Rachel - a neutral female voice)
+  const voiceId = 'EXAVITQu4vr4xnSDxMaL';
+  
+  const response = await fetch(
+    `https://api.elevenlabs.io/v1/text-to-speech/${voiceId}`,
+    {
+      method: 'POST',
+      headers: {
+        'Accept': 'audio/mpeg',
+        'Content-Type': 'application/json',
+        'xi-api-key': apiKey,
+      },
+      body: JSON.stringify({
+        text: text,
+        model_id: modelId,
+        voice_settings: {
+          stability: 0.5,
+          similarity_boost: 0.75,
+        },
+      }),
+    }
+  );
+
+  if (!response.ok) {
+    const error = await response.text();
+    throw new BadRequestError(`ElevenLabs API error: ${error}`);
+  }
+
+  // Convert audio to base64
+  const audioBuffer = await response.arrayBuffer();
+  const base64Audio = Buffer.from(audioBuffer).toString('base64');
+  
+  return {
+    content: `🎵 **Audio Generated**\n\n[Audio Player]\ndata:audio/mpeg;base64,${base64Audio}\n\n*Generated using ElevenLabs ${modelId}*`,
+    tokensUsed: Math.ceil(text.length * 0.5), // ElevenLabs charges per character
+  };
+};
+
 // Chat with AI model (mock or real)
 export const chatWithModel = async (
   modelId: string,
@@ -97,8 +304,7 @@ export const chatWithModel = async (
 ) => {
   const model = await getModelById(modelId);
 
-  // For now, always use mock responses
-  // In production, check hasRealApiKey and call actual APIs
+  // Check if real API key is available for this provider
   const useMock = !hasRealApiKey(model.provider);
 
   if (useMock) {
@@ -117,9 +323,62 @@ export const chatWithModel = async (
     };
   }
 
-  // TODO: Implement real API calls when keys are available
-  // For now, throw an error to indicate not implemented
-  throw new BadRequestError(`Real API integration for ${model.provider} not yet implemented`);
+  // Call real API based on provider
+  try {
+    let result: { content: string; tokensUsed: number };
+
+    switch (model.provider) {
+      case 'openai':
+        result = await callOpenAI(model.modelId, prompt, conversationHistory, model.category);
+        break;
+      
+      case 'anthropic':
+        result = await callAnthropic(model.modelId, prompt, conversationHistory);
+        break;
+      
+      case 'google':
+        result = await callGoogle(model.modelId, prompt, conversationHistory);
+        break;
+      
+      case 'elevenlabs':
+        result = await callElevenLabs(model.modelId, prompt);
+        break;
+      
+      default:
+        throw new BadRequestError(`Unknown provider: ${model.provider}`);
+    }
+
+    return {
+      model: {
+        id: model.id,
+        name: model.name,
+        provider: model.provider,
+        category: model.category,
+      },
+      response: result.content,
+      tokensUsed: result.tokensUsed,
+      isMock: false,
+    };
+  } catch (error: any) {
+    // Log the error for debugging
+    console.error(`[AI Service] Error calling ${model.provider}:`, error.message);
+    
+    // If API call fails, fall back to mock with error notice
+    const mockResult = generateMockResponse(prompt, model.name, model.category);
+    
+    return {
+      model: {
+        id: model.id,
+        name: model.name,
+        provider: model.provider,
+        category: model.category,
+      },
+      response: `⚠️ **API Error**: ${error.message}\n\n---\n\n**Fallback Mock Response:**\n${mockResult.content}`,
+      tokensUsed: mockResult.tokensUsed,
+      isMock: true,
+      error: error.message,
+    };
+  }
 };
 
 // Calculate token cost

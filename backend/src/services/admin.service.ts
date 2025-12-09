@@ -898,7 +898,7 @@ export const testAPIKey = async (provider: string) => {
           },
         });
         if (!response.ok) {
-          const error = await response.json().catch(() => ({}));
+          const error = await response.json().catch(() => ({})) as { error?: { message?: string } };
           return { success: false, message: error.error?.message || `HTTP ${response.status}` };
         }
         return { success: true, message: 'OpenAI connection successful' };
@@ -1198,8 +1198,8 @@ export const testModel = async (modelId: string) => {
           return { success: false, message: `OpenAI API error: ${response.status}` };
         }
         // Check if the specific model exists
-        const data = await response.json();
-        const modelExists = data.data?.some((m: any) => m.id === model.modelId);
+        const data = await response.json() as { data?: Array<{ id: string }> };
+        const modelExists = data.data?.some((m) => m.id === model.modelId);
         if (!modelExists) {
           return { success: false, message: `Model ${model.modelId} not found in your OpenAI account` };
         }

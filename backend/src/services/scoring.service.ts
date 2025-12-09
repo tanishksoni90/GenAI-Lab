@@ -10,7 +10,7 @@
  * - Constraints (15%): Does it set boundaries/format?
  */
 
-interface ScoringCriteria {
+export interface ScoringCriteria {
   clarity: number;      // 0-100
   context: number;      // 0-100
   specificity: number;  // 0-100
@@ -19,7 +19,7 @@ interface ScoringCriteria {
   constraints: number;  // 0-100
 }
 
-interface ScoreResult {
+export interface ScoreResult {
   totalScore: number;
   criteria: ScoringCriteria;
   feedback: {

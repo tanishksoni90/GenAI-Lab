@@ -259,7 +259,7 @@ export const getAllModels = async (req: Request, res: Response, next: NextFuncti
 export const createModel = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const model = await adminService.createModel(req.body);
-    return sendSuccess(res, { model }, 201);
+    return sendSuccess(res, { model }, 'Model created successfully', 201);
   } catch (error) {
     next(error);
   }
