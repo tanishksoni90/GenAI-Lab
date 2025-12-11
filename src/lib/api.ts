@@ -229,6 +229,7 @@ export interface AuthTokens {
 export interface AuthResponse {
   user: User;
   tokens: AuthTokens;
+  mustChangePassword?: boolean;
 }
 
 export const authApi = {
@@ -261,6 +262,12 @@ export const authApi = {
 
   changePassword: (data: { currentPassword: string; newPassword: string }) =>
     apiRequest<ApiResponse<{ message: string }>>('/auth/change-password', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+
+  setNewPassword: (data: { newPassword: string }) =>
+    apiRequest<ApiResponse<{ message: string }>>('/auth/set-new-password', {
       method: 'POST',
       body: JSON.stringify(data),
     }),

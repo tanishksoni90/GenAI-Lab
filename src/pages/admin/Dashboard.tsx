@@ -1589,7 +1589,7 @@ const AdminDashboard = () => {
                         <MessageSquare className="w-4 h-4 text-blue-400" />
                         <div>
                           <p className="text-xs text-muted-foreground">Sessions</p>
-                          <p className="font-bold text-blue-400">{student._count?.sessions || 0}</p>
+                          <p className="font-bold text-blue-400">{student._count?.modelSessions ?? student._count?.sessions ?? 0}</p>
                         </div>
                       </div>
                       <div className="flex items-center gap-2 p-2 rounded-lg" style={{ backgroundColor: 'rgba(139, 92, 246, 0.1)' }}>
@@ -2101,7 +2101,7 @@ const AdminDashboard = () => {
                         {testModelMutation.isPending ? <Loader2 className="w-3 h-3 mr-1 animate-spin" /> : <TestTube className="w-3 h-3 mr-1" />}
                         Test Model
                       </Button>
-                      <Dialog>
+                      <Dialog open={configureModelId === model.id} onOpenChange={(open) => !open && setConfigureModelId(null)}>
                         <DialogTrigger asChild>
                           <Button 
                             variant="outline" 
@@ -2175,7 +2175,7 @@ const AdminDashboard = () => {
                       </Dialog>
                     </div>
                     <div className="grid grid-cols-2 gap-2">
-                      <Dialog>
+                      <Dialog open={accessModelId === model.id} onOpenChange={(open) => !open && setAccessModelId(null)}>
                         <DialogTrigger asChild>
                           <Button 
                             variant="outline" 
@@ -3152,7 +3152,7 @@ const AdminDashboard = () => {
                           </div>
                         </div>
                         <div className="text-right">
-                          <p className="font-medium">{student.sessionsCount} sessions</p>
+                          <p className="font-medium">{student.modelSessionsCount ?? student.sessionsCount} sessions</p>
                           <p className="text-xs text-muted-foreground">{(student.tokenUsed || 0).toLocaleString()} tokens</p>
                         </div>
                       </div>

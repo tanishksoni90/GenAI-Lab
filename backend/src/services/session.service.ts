@@ -3,16 +3,17 @@ import { NotFoundError, InsufficientTokensError, ForbiddenError } from '../utils
 import * as aiService from './ai.service';
 import * as scoringService from './scoring.service';
 
-// Create a new session
-export const createSession = async (
-  userId: string,
-  modelId: string,
-  agentId?: string
-) => {
-  // Verify model exists
-  const model = await aiService.getModelById(modelId);
+// Helper to check if hard limit enforcement is enabled
+async function isHardLimitEnforced(): Promise<boolean> {
+  const settings = await prisma.settings.findUnique({
+    where: { id: 'default' },
+    select: { hardLimitEnforcement: true },
+  });
+  return settings?.hardLimitEnforcement ?? true; // Default to true if not set
+}
 
-  // Check user has tokens
+// Helper to check token availability
+async function checkTokenAvailability(userId: string): Promise<{ available: boolean; tokenQuota: number; tokenUsed: number }> {
   const user = await prisma.user.findUnique({
     where: { id: userId },
     select: { tokenQuota: true, tokenUsed: true },
@@ -22,7 +23,28 @@ export const createSession = async (
     throw new NotFoundError('User not found');
   }
 
-  if (user.tokenUsed >= user.tokenQuota) {
+  const hardLimitEnabled = await isHardLimitEnforced();
+  const available = !hardLimitEnabled || user.tokenUsed < user.tokenQuota;
+  
+  return {
+    available,
+    tokenQuota: user.tokenQuota,
+    tokenUsed: user.tokenUsed,
+  };
+}
+
+// Create a new session
+export const createSession = async (
+  userId: string,
+  modelId: string,
+  agentId?: string
+) => {
+  // Verify model exists
+  const model = await aiService.getModelById(modelId);
+
+  // Check user has tokens (with hard limit enforcement)
+  const tokenCheck = await checkTokenAvailability(userId);
+  if (!tokenCheck.available) {
     throw new InsufficientTokensError();
   }
 
@@ -151,17 +173,9 @@ export const sendMessage = async (
     throw new ForbiddenError('Not authorized to access this session');
   }
 
-  // Check user has tokens
-  const user = await prisma.user.findUnique({
-    where: { id: userId },
-    select: { tokenQuota: true, tokenUsed: true },
-  });
-
-  if (!user) {
-    throw new NotFoundError('User not found');
-  }
-
-  if (user.tokenUsed >= user.tokenQuota) {
+  // Check user has tokens (with hard limit enforcement)
+  const tokenCheck = await checkTokenAvailability(userId);
+  if (!tokenCheck.available) {
     throw new InsufficientTokensError();
   }
 
@@ -171,8 +185,8 @@ export const sendMessage = async (
     content: m.content,
   }));
 
-  // Score the user's prompt
-  const scoreResult = scoringService.scorePrompt(content, conversationHistory);
+  // Score the user's prompt using Gemini AI (cost deducted from budget, not shown in session)
+  const scoreResult = await scoringService.scorePrompt(content, conversationHistory, userId);
 
   // Get AI response
   const aiResponse = await aiService.chatWithModel(
@@ -221,11 +235,25 @@ export const sendMessage = async (
     },
   });
 
-  // Deduct tokens from user
+  // Deduct tokens from user (cap at quota if hard limit is enabled)
+  const currentUser = await prisma.user.findUnique({
+    where: { id: userId },
+    select: { tokenQuota: true, tokenUsed: true },
+  });
+  
+  const hardLimitEnabled = await isHardLimitEnforced();
+  let tokensToAdd = aiResponse.tokensUsed;
+  
+  // If hard limit is enabled, cap the token usage at the quota
+  if (hardLimitEnabled && currentUser) {
+    const remainingQuota = Math.max(0, currentUser.tokenQuota - currentUser.tokenUsed);
+    tokensToAdd = Math.min(tokensToAdd, remainingQuota);
+  }
+
   await prisma.user.update({
     where: { id: userId },
     data: {
-      tokenUsed: { increment: aiResponse.tokensUsed },
+      tokenUsed: { increment: tokensToAdd },
     },
   });
 

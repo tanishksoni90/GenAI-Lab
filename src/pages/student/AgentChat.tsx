@@ -31,22 +31,15 @@ interface ChatMessage {
   content: string;
   timestamp: string;
   score?: number;
-  scoreBreakdown?: {
-    clarity: number;
-    specificity: number;
-    context: number;
-    relevance: number;
-  };
+  scoreBreakdown?: Record<string, number>;
   tokensUsed?: number;
   blocked?: boolean;
   blockReason?: string;
   feedback?: {
-    strengths: string[];
-    biggestGap: string;
-    weakExample: { prompt: string; issue: string };
-    strongExample: { prompt: string; why: string };
-    guidingQuestions: string[];
-    whatToTryNext: string[];
+    strengths?: string[];
+    improvements?: string[];
+    biggestGap?: string;
+    suggestion?: string;
   };
 }
 
@@ -87,37 +80,17 @@ const AgentChat = () => {
     timestamp: new Date().toLocaleTimeString(),
   });
   
-  // Create session when agent loads and no session exists
+  // Only set session ID if one exists in URL (don't create new session on load)
   useEffect(() => {
     if (!agent || !agentId) return;
     
     if (sessionIdFromUrl) {
       setCurrentSessionId(sessionIdFromUrl);
       sessionCreatedRef.current = true;
-    } else if (!currentSessionId && !sessionCreatedRef.current) {
-      sessionCreatedRef.current = true;
-      // Create a new session for this agent
-      createSessionMutation.mutate(
-        { 
-          modelId: agent.modelId,
-          agentId: agent.id,
-          title: `${agent.name} Chat`
-        },
-        {
-          onSuccess: (newSession) => {
-            setCurrentSessionId(newSession.id);
-            setSearchParams({ session: newSession.id });
-            refetchSessions();
-          },
-          onError: () => {
-            toast({
-              title: "Error",
-              description: "Failed to create session",
-              variant: "destructive"
-            });
-          }
-        }
-      );
+    } else {
+      // No session in URL - show welcome message but don't create session yet
+      // Session will be created when user sends first message
+      setMessages([getWelcomeMessage()]);
     }
   }, [agent?.id, sessionIdFromUrl]);
   
@@ -126,12 +99,52 @@ const AgentChat = () => {
     if (currentSession && currentSession.messages && currentSession.messages.length > 0) {
       const loadedMessages: ChatMessage[] = currentSession.messages.map((msg: Message) => {
         // Parse feedback if it's a JSON string
-        let parsedFeedback = undefined;
+        let scoreResult = undefined;
         if (msg.feedback) {
           try {
-            parsedFeedback = typeof msg.feedback === 'string' ? JSON.parse(msg.feedback) : msg.feedback;
+            scoreResult = typeof msg.feedback === 'string' ? JSON.parse(msg.feedback) : msg.feedback;
           } catch {
-            parsedFeedback = undefined;
+            scoreResult = undefined;
+          }
+        }
+        
+        // Transform criteria array to scoreBreakdown object
+        let scoreBreakdown: Record<string, number> | undefined;
+        let criteriaDetails: Array<{ name: string; score: number; maxScore: number; feedback: string }> = [];
+        
+        if (scoreResult?.criteria && Array.isArray(scoreResult.criteria)) {
+          scoreBreakdown = {};
+          criteriaDetails = scoreResult.criteria;
+          scoreResult.criteria.forEach((criterion: { name: string; score: number; maxScore: number; feedback: string }) => {
+            const key = criterion.name.toLowerCase().replace(/\s+/g, '');
+            scoreBreakdown![key] = Math.round((criterion.score / criterion.maxScore) * 100);
+          });
+        }
+
+        // Extract feedback - properly handle Gemini vs rule-based responses
+        let feedbackData: { strengths?: string[]; improvements?: string[]; biggestGap?: string; suggestion?: string } | undefined;
+        if (scoreResult) {
+          const isGemini = scoreResult.analysisSource === 'gemini';
+          
+          if (isGemini) {
+            const highScoreCriteria = criteriaDetails.filter(c => c.score >= c.maxScore * 0.7);
+            const lowScoreCriteria = criteriaDetails.filter(c => c.score < c.maxScore * 0.7);
+            
+            feedbackData = {
+              strengths: highScoreCriteria.map(c => `**${c.name}**: ${c.feedback}`),
+              improvements: lowScoreCriteria.map(c => `**${c.name}**: ${c.feedback}`),
+              suggestion: scoreResult.comparison || scoreResult.feedback,
+            };
+            
+            if (typeof scoreResult.feedback === 'string' && lowScoreCriteria.length > 0) {
+              feedbackData.biggestGap = scoreResult.feedback;
+            }
+          } else {
+            feedbackData = {
+              strengths: criteriaDetails.filter(c => c.score >= c.maxScore * 0.7).map(c => c.feedback),
+              improvements: criteriaDetails.filter(c => c.score < c.maxScore * 0.7).map(c => c.feedback),
+              suggestion: scoreResult.comparison || scoreResult.feedback,
+            };
           }
         }
         
@@ -142,7 +155,8 @@ const AgentChat = () => {
           timestamp: new Date(msg.createdAt).toLocaleTimeString(),
           score: msg.score || undefined,
           tokensUsed: msg.tokens,
-          feedback: parsedFeedback,
+          scoreBreakdown,
+          feedback: feedbackData,
         };
       });
       setMessages(loadedMessages);
@@ -172,7 +186,31 @@ const AgentChat = () => {
   }, [messages, isTyping]);
 
   const handleSendMessage = async () => {
-    if (!inputMessage.trim() || !agent || !currentSessionId) return;
+    if (!inputMessage.trim() || !agent) return;
+
+    // If no session exists, create one first (lazy session creation)
+    let sessionId = currentSessionId;
+    if (!sessionId) {
+      try {
+        const newSession = await createSessionMutation.mutateAsync({
+          modelId: agent.modelId,
+          agentId: agent.id,
+          title: `${agent.name} Chat`
+        });
+        sessionId = newSession.id;
+        setCurrentSessionId(newSession.id);
+        setSearchParams({ session: newSession.id });
+        sessionCreatedRef.current = true;
+        refetchSessions();
+      } catch {
+        toast({
+          title: "Error",
+          description: "Failed to create session",
+          variant: "destructive"
+        });
+        return;
+      }
+    }
 
     const inputTokens = Math.ceil(inputMessage.length / 4);
     const estimatedOutputTokens = 150;
@@ -204,7 +242,7 @@ const AgentChat = () => {
 
     try {
       const result = await sendMessageMutation.mutateAsync({
-        sessionId: currentSessionId,
+        sessionId: sessionId,
         content: inputMessage
       });
       
@@ -220,28 +258,59 @@ const AgentChat = () => {
         }
       }
       
+      // Transform criteria array to scoreBreakdown object
+      // Backend sends: [{name: 'Clarity', score: 20, maxScore: 25, feedback: '...'}, ...]
+      // Frontend expects: {clarity: 80, specificity: 75, ...} (percentage values)
+      let scoreBreakdown: Record<string, number> | undefined;
+      let criteriaDetails: Array<{ name: string; score: number; maxScore: number; feedback: string }> = [];
+      const scoreResult = parsedFeedback || result.userMessage.scoreResult;
+      
+      if (scoreResult?.criteria && Array.isArray(scoreResult.criteria)) {
+        scoreBreakdown = {};
+        criteriaDetails = scoreResult.criteria;
+        scoreResult.criteria.forEach((criterion: { name: string; score: number; maxScore: number; feedback: string }) => {
+          const key = criterion.name.toLowerCase().replace(/\s+/g, '');
+          scoreBreakdown![key] = Math.round((criterion.score / criterion.maxScore) * 100);
+        });
+      }
+
+      // Extract feedback - properly handle Gemini vs rule-based responses
+      let feedbackData: { strengths?: string[]; improvements?: string[]; biggestGap?: string; suggestion?: string } | undefined;
+      if (scoreResult) {
+        const isGemini = scoreResult.analysisSource === 'gemini';
+        
+        if (isGemini) {
+          const highScoreCriteria = criteriaDetails.filter(c => c.score >= c.maxScore * 0.7);
+          const lowScoreCriteria = criteriaDetails.filter(c => c.score < c.maxScore * 0.7);
+          
+          feedbackData = {
+            strengths: highScoreCriteria.map(c => `**${c.name}**: ${c.feedback}`),
+            improvements: lowScoreCriteria.map(c => `**${c.name}**: ${c.feedback}`),
+            suggestion: scoreResult.comparison || scoreResult.feedback,
+          };
+          
+          if (typeof scoreResult.feedback === 'string' && lowScoreCriteria.length > 0) {
+            feedbackData.biggestGap = scoreResult.feedback;
+          }
+        } else {
+          feedbackData = {
+            strengths: criteriaDetails.filter(c => c.score >= c.maxScore * 0.7).map(c => c.feedback),
+            improvements: criteriaDetails.filter(c => c.score < c.maxScore * 0.7).map(c => c.feedback),
+            suggestion: scoreResult.comparison || scoreResult.feedback,
+          };
+        }
+      }
+
       // Update with actual server response
       const actualUserMessage: ChatMessage = {
         id: result.userMessage.id,
         role: 'user',
         content: result.userMessage.content,
         timestamp: new Date(result.userMessage.createdAt).toLocaleTimeString(),
-        score: result.userMessage.scoreResult?.totalScore || result.userMessage.score || undefined,
-        scoreBreakdown: result.userMessage.scoreResult?.criteria ? {
-          clarity: result.userMessage.scoreResult.criteria.clarity,
-          specificity: result.userMessage.scoreResult.criteria.specificity,
-          context: result.userMessage.scoreResult.criteria.context,
-          relevance: result.userMessage.scoreResult.criteria.relevance,
-        } : undefined,
+        score: scoreResult?.totalScore || result.userMessage.score || undefined,
+        scoreBreakdown,
         tokensUsed: result.userMessage.tokens,
-        feedback: parsedFeedback || (result.userMessage.scoreResult?.feedback ? {
-          strengths: result.userMessage.scoreResult.feedback.strengths,
-          biggestGap: result.userMessage.scoreResult.feedback.biggestGap,
-          weakExample: result.userMessage.scoreResult.comparison?.weakExample || { prompt: '', issue: '' },
-          strongExample: result.userMessage.scoreResult.comparison?.strongExample || { prompt: '', why: '' },
-          guidingQuestions: [],
-          whatToTryNext: result.userMessage.scoreResult.feedback.improvements,
-        } : undefined),
+        feedback: feedbackData,
       };
 
       const assistantMessage: ChatMessage = {
@@ -278,24 +347,11 @@ const AgentChat = () => {
   const handleNewChat = () => {
     if (!agent) return;
     
-    // Don't reset sessionCreatedRef - we're creating session here, not in useEffect
+    // Reset state for new chat - session will be created lazily on first message
     setMessages([getWelcomeMessage()]);
-    
-    // Create new session
-    createSessionMutation.mutate(
-      { 
-        modelId: agent.modelId,
-        agentId: agent.id,
-        title: `${agent.name} Chat`
-      },
-      {
-        onSuccess: (newSession) => {
-          setCurrentSessionId(newSession.id);
-          setSearchParams({ session: newSession.id });
-          refetchSessions();
-        }
-      }
-    );
+    setCurrentSessionId(null);
+    sessionCreatedRef.current = false;
+    setSearchParams({});
   };
 
   const handleSwitchSession = (sessionId: string) => {
@@ -743,21 +799,43 @@ const AgentChat = () => {
                     </div>
                   )}
 
-                  {/* What to Try Next */}
-                  {latestUserMessage.feedback?.whatToTryNext && (
+                  {/* Biggest Gap / Overall Feedback */}
+                  {latestUserMessage.feedback?.biggestGap && (latestUserMessage.score || 0) < 80 && (
+                    <div className="glass rounded-xl p-4 border border-orange-500/20">
+                      <div className="flex items-center gap-2 mb-3">
+                        <AlertTriangle className="w-4 h-4 text-orange-400" />
+                        <h4 className="text-sm font-semibold text-orange-400">Overall Feedback</h4>
+                      </div>
+                      <p className="text-xs text-muted-foreground">{latestUserMessage.feedback.biggestGap}</p>
+                    </div>
+                  )}
+
+                  {/* Improvements / What to Try Next */}
+                  {latestUserMessage.feedback?.improvements && latestUserMessage.feedback.improvements.length > 0 && (
                     <div className="glass rounded-xl p-4 border border-primary/20">
                       <div className="flex items-center gap-2 mb-3">
                         <TrendingUp className="w-4 h-4 text-primary" />
-                        <h4 className="text-sm font-semibold text-primary">What to Try Next</h4>
+                        <h4 className="text-sm font-semibold text-primary">Areas to Improve</h4>
                       </div>
                       <ul className="space-y-2">
-                        {latestUserMessage.feedback.whatToTryNext.map((tip, idx) => (
+                        {latestUserMessage.feedback.improvements.map((tip, idx) => (
                           <li key={idx} className="flex items-start gap-2 text-xs">
                             <span className="text-primary font-bold">{idx + 1}.</span>
                             <span className="text-muted-foreground">{tip}</span>
                           </li>
                         ))}
                       </ul>
+                    </div>
+                  )}
+
+                  {/* Suggestion for Improvement */}
+                  {latestUserMessage.feedback?.suggestion && (
+                    <div className="glass rounded-xl p-4 border border-cyan-500/20">
+                      <div className="flex items-center gap-2 mb-3">
+                        <FileText className="w-4 h-4 text-cyan-400" />
+                        <h4 className="text-sm font-semibold text-cyan-400">Suggestion</h4>
+                      </div>
+                      <p className="text-xs text-muted-foreground">{latestUserMessage.feedback.suggestion}</p>
                     </div>
                   )}
                 </div>

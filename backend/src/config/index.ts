@@ -25,20 +25,23 @@ export const config = {
   maxFileSize: parseInt(process.env.MAX_FILE_SIZE || '10485760', 10), // 10MB
   uploadDir: process.env.UPLOAD_DIR || './uploads',
   
-  // AI Providers (optional - will use mock if not provided)
+  // AI Providers
+  // ⚠️ API KEYS ARE NOW MANAGED VIA ADMIN DASHBOARD (stored in database)
+  // These config values are kept for backwards compatibility but are no longer used.
+  // All API key lookups now go through the database via admin.service.ts
   ai: {
     openai: {
-      apiKey: process.env.OPENAI_API_KEY || '',
-      baseUrl: process.env.OPENAI_BASE_URL || 'https://api.openai.com/v1',
+      apiKey: '', // Managed via Admin Dashboard → API Keys
+      baseUrl: 'https://api.openai.com/v1',
     },
     google: {
-      apiKey: process.env.GOOGLE_AI_API_KEY || '',
+      apiKey: '', // Managed via Admin Dashboard → API Keys
     },
     anthropic: {
-      apiKey: process.env.ANTHROPIC_API_KEY || '',
+      apiKey: '', // Managed via Admin Dashboard → API Keys
     },
     elevenlabs: {
-      apiKey: process.env.ELEVENLABS_API_KEY || '',
+      apiKey: '', // Managed via Admin Dashboard → API Keys
     },
   },
   

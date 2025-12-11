@@ -354,3 +354,23 @@ export const updateSettings = async (req: Request, res: Response, next: NextFunc
   }
 };
 
+// Get users with exceeded quotas
+export const getExceededQuotaUsers = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const users = await adminService.getExceededQuotaUsers();
+    return sendSuccess(res, { users });
+  } catch (error) {
+    next(error);
+  }
+};
+
+// Fix users with exceeded quotas
+export const fixExceededQuotas = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const result = await adminService.fixExceededQuotas();
+    return sendSuccess(res, result);
+  } catch (error) {
+    next(error);
+  }
+};
+

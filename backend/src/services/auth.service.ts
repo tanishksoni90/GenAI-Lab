@@ -35,6 +35,7 @@ interface AuthResponse {
     registrationId?: string | null;
     tokenQuota: number;
     tokenUsed: number;
+    mustChangePassword?: boolean;
   };
   tokens: AuthTokens;
 }
@@ -203,6 +204,7 @@ export const login = async (input: LoginInput): Promise<AuthResponse> => {
       tokenQuota: true,
       tokenUsed: true,
       isActive: true,
+      mustChangePassword: true,
     },
   });
   
@@ -244,11 +246,12 @@ export const login = async (input: LoginInput): Promise<AuthResponse> => {
   });
   
   // Remove password from response
-  const { password: _, ...userWithoutPassword } = user;
+  const { password: _, mustChangePassword, ...userWithoutPassword } = user;
   
   return { 
     user: userWithoutPassword,
-    tokens 
+    tokens,
+    mustChangePassword: mustChangePassword || false,
   };
 };
 
@@ -340,7 +343,7 @@ export const updateProfile = async (
   });
 };
 
-// Change password
+// Change password (requires current password)
 export const changePassword = async (
   userId: string,
   currentPassword: string,
@@ -364,9 +367,44 @@ export const changePassword = async (
   
   await prisma.user.update({
     where: { id: userId },
-    data: { password: hashedPassword },
+    data: { 
+      password: hashedPassword,
+      mustChangePassword: false, // Clear the flag after password change
+    },
   });
   
   return { message: 'Password changed successfully' };
+};
+
+// Set new password (for forced password change after admin reset)
+// This doesn't require current password but verifies the user has mustChangePassword flag
+export const setNewPassword = async (
+  userId: string,
+  newPassword: string
+) => {
+  const user = await prisma.user.findUnique({
+    where: { id: userId },
+    select: { mustChangePassword: true },
+  });
+  
+  if (!user) {
+    throw new NotFoundError('User not found');
+  }
+  
+  if (!user.mustChangePassword) {
+    throw new BadRequestError('Password change not required. Use the regular change password option.');
+  }
+  
+  const hashedPassword = await hashPassword(newPassword);
+  
+  await prisma.user.update({
+    where: { id: userId },
+    data: { 
+      password: hashedPassword,
+      mustChangePassword: false,
+    },
+  });
+  
+  return { message: 'Password set successfully' };
 };
 
