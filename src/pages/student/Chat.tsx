@@ -187,6 +187,52 @@ const StudentChat = () => {
           }
         }
         
+        // Transform criteria array to scoreBreakdown object
+        // Backend sends: [{name: 'Clarity', score: 20, maxScore: 25, feedback: '...'}, ...]
+        // Frontend expects: {clarity: 80, specificity: 75, ...} (percentage values)
+        let scoreBreakdown: Record<string, number> | undefined;
+        let criteriaDetails: Array<{ name: string; score: number; maxScore: number; feedback: string }> = [];
+        
+        if (scoreResult?.criteria && Array.isArray(scoreResult.criteria)) {
+          scoreBreakdown = {};
+          criteriaDetails = scoreResult.criteria;
+          scoreResult.criteria.forEach((criterion: { name: string; score: number; maxScore: number; feedback: string }) => {
+            const key = criterion.name.toLowerCase().replace(/\s+/g, '');
+            // Convert to percentage (score out of maxScore * 100)
+            scoreBreakdown![key] = Math.round((criterion.score / criterion.maxScore) * 100);
+          });
+        }
+
+        // Extract feedback - properly handle Gemini vs rule-based responses
+        let feedbackData: { strengths?: string[]; improvements?: string[]; biggestGap?: string; suggestion?: string } | undefined;
+        if (scoreResult) {
+          const isGemini = scoreResult.analysisSource === 'gemini';
+          
+          if (isGemini) {
+            // For Gemini: Extract strengths and improvements from criteria feedback
+            const highScoreCriteria = criteriaDetails.filter(c => c.score >= c.maxScore * 0.7);
+            const lowScoreCriteria = criteriaDetails.filter(c => c.score < c.maxScore * 0.7);
+            
+            feedbackData = {
+              strengths: highScoreCriteria.map(c => `**${c.name}**: ${c.feedback}`),
+              improvements: lowScoreCriteria.map(c => `**${c.name}**: ${c.feedback}`),
+              suggestion: scoreResult.comparison || scoreResult.feedback, // improvedPromptSuggestion or overallFeedback
+            };
+            
+            // If there's an overall feedback, add it as the biggest gap summary
+            if (typeof scoreResult.feedback === 'string' && lowScoreCriteria.length > 0) {
+              feedbackData.biggestGap = scoreResult.feedback;
+            }
+          } else {
+            // For rule-based: Use the concatenated feedback strings
+            feedbackData = {
+              strengths: criteriaDetails.filter(c => c.score >= c.maxScore * 0.7).map(c => c.feedback),
+              improvements: criteriaDetails.filter(c => c.score < c.maxScore * 0.7).map(c => c.feedback),
+              suggestion: scoreResult.comparison || scoreResult.feedback,
+            };
+          }
+        }
+        
         return {
           id: m.id,
           role: m.role,
@@ -194,8 +240,8 @@ const StudentChat = () => {
           timestamp: new Date(m.createdAt).toLocaleTimeString(),
           score: m.score,
           tokensUsed: m.tokens,
-          scoreBreakdown: scoreResult?.criteria,
-          feedback: scoreResult?.feedback,
+          scoreBreakdown,
+          feedback: feedbackData,
           comparison: scoreResult?.comparison,
         };
       });
@@ -374,6 +420,47 @@ const StudentChat = () => {
         // Add user message if present
         if (result?.userMessage) {
           const scoreResult = result.userMessage.scoreResult;
+          
+          // Transform criteria array to scoreBreakdown object
+          let scoreBreakdown: Record<string, number> | undefined;
+          let criteriaDetails: Array<{ name: string; score: number; maxScore: number; feedback: string }> = [];
+          
+          if (scoreResult?.criteria && Array.isArray(scoreResult.criteria)) {
+            scoreBreakdown = {};
+            criteriaDetails = scoreResult.criteria;
+            scoreResult.criteria.forEach((criterion: { name: string; score: number; maxScore: number; feedback: string }) => {
+              const key = criterion.name.toLowerCase().replace(/\s+/g, '');
+              scoreBreakdown![key] = Math.round((criterion.score / criterion.maxScore) * 100);
+            });
+          }
+
+          // Extract feedback - properly handle Gemini vs rule-based responses
+          let feedbackData: { strengths?: string[]; improvements?: string[]; biggestGap?: string; suggestion?: string } | undefined;
+          if (scoreResult) {
+            const isGemini = scoreResult.analysisSource === 'gemini';
+            
+            if (isGemini) {
+              const highScoreCriteria = criteriaDetails.filter(c => c.score >= c.maxScore * 0.7);
+              const lowScoreCriteria = criteriaDetails.filter(c => c.score < c.maxScore * 0.7);
+              
+              feedbackData = {
+                strengths: highScoreCriteria.map(c => `**${c.name}**: ${c.feedback}`),
+                improvements: lowScoreCriteria.map(c => `**${c.name}**: ${c.feedback}`),
+                suggestion: scoreResult.comparison || scoreResult.feedback,
+              };
+              
+              if (typeof scoreResult.feedback === 'string' && lowScoreCriteria.length > 0) {
+                feedbackData.biggestGap = scoreResult.feedback;
+              }
+            } else {
+              feedbackData = {
+                strengths: criteriaDetails.filter(c => c.score >= c.maxScore * 0.7).map(c => c.feedback),
+                improvements: criteriaDetails.filter(c => c.score < c.maxScore * 0.7).map(c => c.feedback),
+                suggestion: scoreResult.comparison || scoreResult.feedback,
+              };
+            }
+          }
+
           newMessages.push({
             id: result.userMessage.id || `user-${Date.now()}`,
             role: 'user' as const,
@@ -383,8 +470,8 @@ const StudentChat = () => {
               : new Date().toLocaleTimeString(),
             score: result.userMessage.score,
             tokensUsed: result.userMessage.tokens,
-            feedback: scoreResult?.feedback,
-            scoreBreakdown: scoreResult?.criteria,
+            feedback: feedbackData,
+            scoreBreakdown,
             comparison: scoreResult?.comparison as ChatMessage['comparison'],
           });
         }

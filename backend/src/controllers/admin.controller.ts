@@ -259,7 +259,7 @@ export const getAllModels = async (req: Request, res: Response, next: NextFuncti
 export const createModel = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const model = await adminService.createModel(req.body);
-    return sendSuccess(res, { model }, 201);
+    return sendSuccess(res, { model }, 'Model created successfully', 201);
   } catch (error) {
     next(error);
   }
@@ -349,6 +349,26 @@ export const updateSettings = async (req: Request, res: Response, next: NextFunc
   try {
     const settings = await adminService.updateSettings(req.body);
     return sendSuccess(res, { settings }, 'Settings updated successfully');
+  } catch (error) {
+    next(error);
+  }
+};
+
+// Get users with exceeded quotas
+export const getExceededQuotaUsers = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const users = await adminService.getExceededQuotaUsers();
+    return sendSuccess(res, { users });
+  } catch (error) {
+    next(error);
+  }
+};
+
+// Fix users with exceeded quotas
+export const fixExceededQuotas = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const result = await adminService.fixExceededQuotas();
+    return sendSuccess(res, result);
   } catch (error) {
     next(error);
   }

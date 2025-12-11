@@ -122,6 +122,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     try {
       const response = await authApi.login(credentials);
       const userRole = response.data.user.role as 'admin' | 'student';
+      const mustChangePassword = response.data.mustChangePassword;
       
       // Save tokens with the user's actual role
       saveTokens(response.data.tokens, userRole);
@@ -130,6 +131,12 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
       queryClient.clear();
       
       setUser(response.data.user);
+      
+      // Check if user must change password (only for students after admin reset)
+      if (mustChangePassword && userRole === 'student') {
+        navigate('/student/set-new-password');
+        return;
+      }
       
       // Navigate based on role
       if (userRole === 'admin') {

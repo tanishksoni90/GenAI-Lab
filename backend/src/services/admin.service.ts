@@ -1,7 +1,37 @@
 import { prisma } from '../lib/prisma';
 import { NotFoundError, BadRequestError, ConflictError } from '../utils/errors';
 import bcrypt from 'bcryptjs';
+import crypto from 'crypto';
 import { config } from '../config';
+import { clearApiKeyCache } from './ai.service';
+
+// ==================== HELPER FUNCTIONS ====================
+
+/**
+ * Generate a secure random password
+ * Format: 3 random words + 2 digits + 1 special char
+ * Example: "Tiger$Oak9Blue2!" or "River#Sun4Moon7@"
+ */
+function generateSecurePassword(): string {
+  // Word lists for memorable but secure passwords
+  const adjectives = ['Red', 'Blue', 'Green', 'Gold', 'Silver', 'Dark', 'Bright', 'Swift', 'Bold', 'Calm'];
+  const nouns = ['Tiger', 'Eagle', 'River', 'Storm', 'Cloud', 'Stone', 'Flame', 'Ocean', 'Moon', 'Star'];
+  const specials = ['!', '@', '#', '$', '%', '&', '*'];
+  
+  // Generate cryptographically secure random selections
+  const randomBytes = crypto.randomBytes(6);
+  
+  const adj = adjectives[randomBytes[0] % adjectives.length];
+  const noun1 = nouns[randomBytes[1] % nouns.length];
+  const noun2 = nouns[randomBytes[2] % nouns.length];
+  const digit1 = randomBytes[3] % 10;
+  const digit2 = randomBytes[4] % 10;
+  const special = specials[randomBytes[5] % specials.length];
+  
+  // Combine into a strong but memorable password
+  // Format: Adjective + Special + Noun + Digit + Noun + Digit + Special
+  return `${adj}${special}${noun1}${digit1}${noun2}${digit2}!`;
+}
 
 // ==================== STUDENT MANAGEMENT ====================
 
@@ -73,26 +103,39 @@ export const getStudents = async (options: {
         course: { select: { id: true, name: true } },
         batch: { select: { id: true, name: true } },
         sessions: {
-          select: { avgScore: true },
+          select: { avgScore: true, agentId: true },
         },
         _count: {
-          select: { sessions: true, agents: true, artifacts: true },
+          select: { agents: true, artifacts: true },
         },
       },
     }),
     prisma.user.count({ where }),
   ]);
 
-  // Calculate average score for each student
+  // Calculate average score and separate session counts for each student
   const students = studentsRaw.map(student => {
     const sessionsWithScore = student.sessions.filter(s => s.avgScore !== null);
     const avgScore = sessionsWithScore.length > 0
       ? sessionsWithScore.reduce((sum, s) => sum + (s.avgScore || 0), 0) / sessionsWithScore.length
       : null;
     
-    // Remove sessions array from response, just return avgScore
+    // Separate model sessions (agentId = null) from agent sessions (agentId != null)
+    const modelSessionsCount = student.sessions.filter(s => s.agentId === null).length;
+    const agentSessionsCount = student.sessions.filter(s => s.agentId !== null).length;
+    
+    // Remove sessions array from response, just return counts and avgScore
     const { sessions, ...rest } = student;
-    return { ...rest, avgScore };
+    return { 
+      ...rest, 
+      avgScore,
+      _count: {
+        ...rest._count,
+        sessions: modelSessionsCount, // Model sessions only for backward compatibility
+        modelSessions: modelSessionsCount,
+        agentSessions: agentSessionsCount,
+      }
+    };
   });
 
   return { students, total, page, limit };
@@ -116,7 +159,6 @@ export const getStudent = async (studentId: string) => {
       course: { select: { id: true, name: true } },
       batch: { select: { id: true, name: true } },
       sessions: {
-        take: 5,
         orderBy: { createdAt: 'desc' },
         select: {
           id: true,
@@ -124,11 +166,12 @@ export const getStudent = async (studentId: string) => {
           avgScore: true,
           tokensUsed: true,
           createdAt: true,
+          agentId: true,
           model: { select: { name: true } },
         },
       },
       _count: {
-        select: { sessions: true, agents: true, artifacts: true },
+        select: { agents: true, artifacts: true },
       },
     },
   });
@@ -137,7 +180,23 @@ export const getStudent = async (studentId: string) => {
     throw new NotFoundError('Student not found');
   }
 
-  return student;
+  // Separate model sessions from agent sessions
+  const modelSessions = student.sessions.filter(s => s.agentId === null);
+  const agentSessions = student.sessions.filter(s => s.agentId !== null);
+
+  return {
+    ...student,
+    // Return only last 5 model sessions for recent activity display
+    sessions: modelSessions.slice(0, 5).map(({ agentId, ...rest }) => rest),
+    // Return only last 5 agent sessions
+    agentSessions: agentSessions.slice(0, 5).map(({ agentId, ...rest }) => rest),
+    _count: {
+      ...student._count,
+      sessions: modelSessions.length, // Model sessions only for backward compatibility
+      modelSessions: modelSessions.length,
+      agentSessions: agentSessions.length,
+    },
+  };
 };
 
 // Create a new student
@@ -272,12 +331,16 @@ export const resetStudentPassword = async (studentId: string) => {
     throw new BadRequestError('User is not a student');
   }
 
-  const newPassword = `${student.registrationId}@Reset${Date.now().toString().slice(-4)}`;
+  // Generate a secure random password
+  const newPassword = generateSecurePassword();
   const hashedPassword = await bcrypt.hash(newPassword, 12);
 
   await prisma.user.update({
     where: { id: studentId },
-    data: { password: hashedPassword },
+    data: { 
+      password: hashedPassword,
+      mustChangePassword: true, // Force password change on next login
+    },
   });
 
   return { newPassword };
@@ -321,11 +384,15 @@ export const bulkOperation = async (input: BulkOperationInput) => {
     case 'reset_passwords':
       const updates = await Promise.all(
         students.map(async (student) => {
-          const newPassword = `${student.registrationId}@Reset${Date.now().toString().slice(-4)}`;
+          // Generate a secure random password for each student
+          const newPassword = generateSecurePassword();
           const hashedPassword = await bcrypt.hash(newPassword, 12);
           await prisma.user.update({
             where: { id: student.id },
-            data: { password: hashedPassword },
+            data: { 
+              password: hashedPassword,
+              mustChangePassword: true, // Force password change on next login
+            },
           });
           return { registrationId: student.registrationId, newPassword };
         })
@@ -587,7 +654,7 @@ export const getAnalytics = async () => {
   ] = await Promise.all([
     prisma.user.count({ where: { role: 'student' } }),
     prisma.user.count({ where: { role: 'student', isActive: true } }),
-    prisma.session.count(),
+    prisma.session.count({ where: { agentId: null } }), // Only model sessions
     prisma.message.count({ where: { role: 'user' } }),
     prisma.user.aggregate({
       where: { role: 'student' },
@@ -648,11 +715,11 @@ export const getAnalytics = async () => {
     },
   });
 
-  // Get sessions by time period
+  // Get model sessions by time period (agentId is null)
   const [dailySessions, weeklySessions, monthlySessions] = await Promise.all([
-    prisma.session.count({ where: { createdAt: { gte: startOfToday } } }),
-    prisma.session.count({ where: { createdAt: { gte: startOfWeek } } }),
-    prisma.session.count({ where: { createdAt: { gte: startOfMonth } } }),
+    prisma.session.count({ where: { createdAt: { gte: startOfToday }, agentId: null } }),
+    prisma.session.count({ where: { createdAt: { gte: startOfWeek }, agentId: null } }),
+    prisma.session.count({ where: { createdAt: { gte: startOfMonth }, agentId: null } }),
   ]);
 
   // Get prompts by time period
@@ -715,25 +782,38 @@ export const getAnalytics = async () => {
     model: models.find(m => m.id === usage.modelId),
   }));
 
-  // Get top performers
+  // Get top performers (ordered by model sessions, not total sessions)
   const topPerformers = await prisma.user.findMany({
     where: { role: 'student', isActive: true },
     take: 10,
-    orderBy: {
-      sessions: {
-        _count: 'desc',
-      },
-    },
     select: {
       id: true,
       name: true,
       registrationId: true,
       tokenUsed: true,
       sessions: {
-        select: { avgScore: true },
+        select: { avgScore: true, agentId: true },
       },
     },
   });
+
+  // Sort by model sessions count (sessions without agentId)
+  const sortedTopPerformers = topPerformers
+    .map(p => {
+      const modelSessions = p.sessions.filter(s => s.agentId === null);
+      const agentSessions = p.sessions.filter(s => s.agentId !== null);
+      return {
+        ...p,
+        modelSessionsCount: modelSessions.length,
+        agentSessionsCount: agentSessions.length,
+        avgScore: modelSessions.length > 0
+          ? modelSessions.reduce((sum, s) => sum + (s.avgScore || 0), 0) / modelSessions.length
+          : 0,
+        sessionsCount: modelSessions.length, // For backward compatibility
+      };
+    })
+    .sort((a, b) => b.modelSessionsCount - a.modelSessionsCount)
+    .slice(0, 10);
 
   return {
     overview: {
@@ -780,13 +860,7 @@ export const getAnalytics = async () => {
     },
     dailyActivity,
     modelUsage: modelUsageWithDetails,
-    topPerformers: topPerformers.map(p => ({
-      ...p,
-      avgScore: p.sessions.length > 0
-        ? p.sessions.reduce((sum, s) => sum + s.avgScore, 0) / p.sessions.length
-        : 0,
-      sessionsCount: p.sessions.length,
-    })),
+    topPerformers: sortedTopPerformers.map(({ sessions, ...rest }) => rest),
   };
 };
 
@@ -847,16 +921,22 @@ export const updateAPIKey = async (
 ) => {
   const existing = await prisma.aPIKey.findUnique({ where: { provider } });
 
+  let result;
   if (existing) {
-    return prisma.aPIKey.update({
+    result = await prisma.aPIKey.update({
       where: { provider },
       data: { apiKey, baseUrl, isActive: true },
     });
   } else {
-    return prisma.aPIKey.create({
+    result = await prisma.aPIKey.create({
       data: { provider, apiKey, baseUrl },
     });
   }
+  
+  // Clear the API key cache so the new key is used immediately
+  clearApiKeyCache(provider);
+  
+  return result;
 };
 
 // Delete API key (only for custom providers)
@@ -898,7 +978,7 @@ export const testAPIKey = async (provider: string) => {
           },
         });
         if (!response.ok) {
-          const error = await response.json().catch(() => ({}));
+          const error = await response.json().catch(() => ({})) as { error?: { message?: string } };
           return { success: false, message: error.error?.message || `HTTP ${response.status}` };
         }
         return { success: true, message: 'OpenAI connection successful' };
@@ -1198,8 +1278,8 @@ export const testModel = async (modelId: string) => {
           return { success: false, message: `OpenAI API error: ${response.status}` };
         }
         // Check if the specific model exists
-        const data = await response.json();
-        const modelExists = data.data?.some((m: any) => m.id === model.modelId);
+        const data = await response.json() as { data?: Array<{ id: string }> };
+        const modelExists = data.data?.some((m) => m.id === model.modelId);
         if (!modelExists) {
           return { success: false, message: `Model ${model.modelId} not found in your OpenAI account` };
         }
@@ -1365,5 +1445,48 @@ export const updateSettings = async (input: UpdateSettingsInput) => {
   });
 
   return settings;
+};
+
+// Fix users who have exceeded their token quota (cap tokenUsed at tokenQuota)
+export const fixExceededQuotas = async () => {
+  // Find all users where tokenUsed > tokenQuota
+  const exceededUsers = await prisma.user.findMany({
+    where: {
+      tokenUsed: {
+        gt: prisma.user.fields.tokenQuota,
+      },
+    },
+    select: { id: true, email: true, tokenUsed: true, tokenQuota: true },
+  });
+
+  // This raw query approach is more reliable for comparing columns
+  const result = await prisma.$executeRaw`
+    UPDATE User 
+    SET tokenUsed = tokenQuota, updatedAt = datetime('now')
+    WHERE tokenUsed > tokenQuota
+  `;
+
+  return {
+    message: `Fixed ${result} user(s) with exceeded quotas`,
+    fixedCount: result,
+  };
+};
+
+// Get users with exceeded quotas (for display purposes)
+export const getExceededQuotaUsers = async () => {
+  const users = await prisma.$queryRaw<Array<{
+    id: string;
+    email: string;
+    name: string;
+    tokenUsed: number;
+    tokenQuota: number;
+    exceeded: number;
+  }>>`
+    SELECT id, email, name, tokenUsed, tokenQuota, (tokenUsed - tokenQuota) as exceeded
+    FROM User 
+    WHERE tokenUsed > tokenQuota
+  `;
+
+  return users;
 };
 

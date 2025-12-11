@@ -11,6 +11,7 @@ import AdminSignIn from "./pages/admin/SignIn";
 import AdminDashboard from "./pages/admin/Dashboard";
 import StudentSignIn from "./pages/student/SignIn";
 import StudentSignUp from "./pages/student/SignUp";
+import SetNewPassword from "./pages/student/SetNewPassword";
 import StudentDashboard from "./pages/student/Dashboard";
 import StudentChat from "./pages/student/Chat";
 import AgentChat from "./pages/student/AgentChat";
@@ -40,6 +41,7 @@ const App = () => (
               <Route path="/admin/dashboard" element={<AdminDashboard />} />
               <Route path="/student/signin" element={<StudentSignIn />} />
               <Route path="/student/signup" element={<StudentSignUp />} />
+              <Route path="/student/set-new-password" element={<SetNewPassword />} />
               <Route path="/student/dashboard" element={<StudentDashboard />} />
               <Route path="/student/chat/:modelId" element={<StudentChat />} />
               <Route path="/student/agent-chat/:agentId" element={<AgentChat />} />

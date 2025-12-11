@@ -20,6 +20,9 @@ model User {
   role          String    @default("student") // student | admin
   registrationId String?  @unique
   
+  // Password management
+  mustChangePassword Boolean @default(false) // Force password change on next login
+  
   // Student specific
   courseId      String?
   course        Course?   @relation(fields: [courseId], references: [id])

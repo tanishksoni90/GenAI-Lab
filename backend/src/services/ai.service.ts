@@ -1,20 +1,120 @@
 import { prisma } from '../lib/prisma';
 import { config } from '../config';
 import { NotFoundError, BadRequestError } from '../utils/errors';
+import OpenAI from 'openai';
+import Anthropic from '@anthropic-ai/sdk';
+import { GoogleGenerativeAI } from '@google/generative-ai';
 
-// Check if real API keys are configured
-const hasRealApiKey = (provider: string): boolean => {
-  switch (provider) {
-    case 'openai':
-      return !!config.ai.openai.apiKey;
-    case 'google':
-      return !!config.ai.google.apiKey;
-    case 'anthropic':
-      return !!config.ai.anthropic.apiKey;
-    case 'elevenlabs':
-      return !!config.ai.elevenlabs.apiKey;
-    default:
-      return false;
+// Cache for API keys from database (with TTL)
+interface CachedApiKey {
+  apiKey: string;
+  baseUrl?: string | null;
+  cachedAt: number;
+}
+
+const apiKeyCache: Map<string, CachedApiKey> = new Map();
+const CACHE_TTL = 60000; // 1 minute cache
+
+// Cache for AI clients (recreated when API keys change)
+const clientCache: Map<string, { client: any; apiKey: string }> = new Map();
+
+// Get API key from database with caching
+const getApiKeyFromDB = async (provider: string): Promise<{ apiKey: string; baseUrl?: string | null } | null> => {
+  const cacheKey = provider.toLowerCase();
+  const cached = apiKeyCache.get(cacheKey);
+  
+  // Return cached value if still valid
+  if (cached && Date.now() - cached.cachedAt < CACHE_TTL) {
+    return { apiKey: cached.apiKey, baseUrl: cached.baseUrl };
+  }
+  
+  // Fetch from database
+  const key = await prisma.aPIKey.findUnique({
+    where: { provider: cacheKey },
+  });
+  
+  if (key && key.apiKey && key.isActive) {
+    apiKeyCache.set(cacheKey, {
+      apiKey: key.apiKey,
+      baseUrl: key.baseUrl,
+      cachedAt: Date.now(),
+    });
+    return { apiKey: key.apiKey, baseUrl: key.baseUrl };
+  }
+  
+  // Clear cache if key not found or inactive
+  apiKeyCache.delete(cacheKey);
+  return null;
+};
+
+// Get OpenAI client (creates new client if API key changed)
+const getOpenAIClient = async (): Promise<OpenAI | null> => {
+  const keyData = await getApiKeyFromDB('openai');
+  if (!keyData) return null;
+  
+  const cached = clientCache.get('openai');
+  if (cached && cached.apiKey === keyData.apiKey) {
+    return cached.client as OpenAI;
+  }
+  
+  // Create new client
+  const client = new OpenAI({
+    apiKey: keyData.apiKey,
+    baseURL: keyData.baseUrl || 'https://api.openai.com/v1',
+  });
+  
+  clientCache.set('openai', { client, apiKey: keyData.apiKey });
+  return client;
+};
+
+// Get Anthropic client
+const getAnthropicClient = async (): Promise<Anthropic | null> => {
+  const keyData = await getApiKeyFromDB('anthropic');
+  if (!keyData) return null;
+  
+  const cached = clientCache.get('anthropic');
+  if (cached && cached.apiKey === keyData.apiKey) {
+    return cached.client as Anthropic;
+  }
+  
+  const client = new Anthropic({
+    apiKey: keyData.apiKey,
+  });
+  
+  clientCache.set('anthropic', { client, apiKey: keyData.apiKey });
+  return client;
+};
+
+// Get Google client
+const getGoogleClient = async (): Promise<GoogleGenerativeAI | null> => {
+  const keyData = await getApiKeyFromDB('google');
+  if (!keyData) return null;
+  
+  const cached = clientCache.get('google');
+  if (cached && cached.apiKey === keyData.apiKey) {
+    return cached.client as GoogleGenerativeAI;
+  }
+  
+  const client = new GoogleGenerativeAI(keyData.apiKey);
+  
+  clientCache.set('google', { client, apiKey: keyData.apiKey });
+  return client;
+};
+
+// Check if real API keys are configured (from database)
+const hasRealApiKey = async (provider: string): Promise<boolean> => {
+  const keyData = await getApiKeyFromDB(provider.toLowerCase());
+  return !!keyData;
+};
+
+// Clear API key cache (call when keys are updated via admin dashboard)
+export const clearApiKeyCache = (provider?: string) => {
+  if (provider) {
+    apiKeyCache.delete(provider.toLowerCase());
+    clientCache.delete(provider.toLowerCase());
+  } else {
+    apiKeyCache.clear();
+    clientCache.clear();
   }
 };
 
@@ -89,6 +189,176 @@ const generateMockResponse = (
   };
 };
 
+// ==================== REAL API IMPLEMENTATIONS ====================
+
+// OpenAI API call (GPT models and DALL-E)
+const callOpenAI = async (
+  modelId: string,
+  prompt: string,
+  conversationHistory: Array<{ role: string; content: string }>,
+  category: string
+): Promise<{ content: string; tokensUsed: number }> => {
+  const client = await getOpenAIClient();
+  if (!client) {
+    throw new BadRequestError('OpenAI API key not configured. Please add it in Admin Dashboard → API Keys.');
+  }
+
+  // Handle image generation (DALL-E)
+  if (category === 'image') {
+    const response = await client.images.generate({
+      model: modelId,
+      prompt: prompt,
+      n: 1,
+      size: '1024x1024',
+    });
+    
+    const imageData = response.data?.[0];
+    const imageUrl = imageData?.url || imageData?.b64_json || '';
+    return {
+      content: `![Generated Image](${imageUrl})\n\n*Image generated using ${modelId}*`,
+      tokensUsed: 1000, // DALL-E has fixed per-image cost
+    };
+  }
+
+  // Handle text/chat models
+  const messages: OpenAI.Chat.ChatCompletionMessageParam[] = [
+    ...conversationHistory.map(msg => ({
+      role: msg.role as 'user' | 'assistant' | 'system',
+      content: msg.content,
+    })),
+    { role: 'user' as const, content: prompt },
+  ];
+
+  const response = await client.chat.completions.create({
+    model: modelId,
+    messages,
+    max_tokens: 2048,
+  });
+
+  const content = response.choices[0]?.message?.content || '';
+  const tokensUsed = response.usage?.total_tokens || 
+    Math.ceil(prompt.length / 4) + Math.ceil(content.length / 4);
+
+  return { content, tokensUsed };
+};
+
+// Anthropic API call (Claude models)
+const callAnthropic = async (
+  modelId: string,
+  prompt: string,
+  conversationHistory: Array<{ role: string; content: string }>
+): Promise<{ content: string; tokensUsed: number }> => {
+  const client = await getAnthropicClient();
+  if (!client) {
+    throw new BadRequestError('Anthropic API key not configured. Please add it in Admin Dashboard → API Keys.');
+  }
+
+  // Convert history to Anthropic format
+  const messages: Anthropic.MessageParam[] = [
+    ...conversationHistory.map(msg => ({
+      role: msg.role as 'user' | 'assistant',
+      content: msg.content,
+    })),
+    { role: 'user' as const, content: prompt },
+  ];
+
+  const response = await client.messages.create({
+    model: modelId,
+    max_tokens: 2048,
+    messages,
+  });
+
+  const content = response.content[0]?.type === 'text' 
+    ? response.content[0].text 
+    : '';
+  
+  const tokensUsed = (response.usage?.input_tokens || 0) + (response.usage?.output_tokens || 0);
+
+  return { content, tokensUsed };
+};
+
+// Google AI API call (Gemini models)
+const callGoogle = async (
+  modelId: string,
+  prompt: string,
+  conversationHistory: Array<{ role: string; content: string }>
+): Promise<{ content: string; tokensUsed: number }> => {
+  const client = await getGoogleClient();
+  if (!client) {
+    throw new BadRequestError('Google AI API key not configured. Please add it in Admin Dashboard → API Keys.');
+  }
+
+  const model = client.getGenerativeModel({ model: modelId });
+
+  // Build conversation history for Gemini
+  const history = conversationHistory.map(msg => ({
+    role: msg.role === 'assistant' ? 'model' : 'user',
+    parts: [{ text: msg.content }],
+  }));
+
+  // Start chat with history
+  const chat = model.startChat({
+    history: history as any,
+  });
+
+  const result = await chat.sendMessage(prompt);
+  const response = await result.response;
+  const content = response.text();
+
+  // Estimate tokens (Gemini doesn't always return usage)
+  const tokensUsed = Math.ceil(prompt.length / 4) + Math.ceil(content.length / 4);
+
+  return { content, tokensUsed };
+};
+
+// ElevenLabs API call (Text-to-Speech)
+const callElevenLabs = async (
+  modelId: string,
+  text: string
+): Promise<{ content: string; tokensUsed: number }> => {
+  const keyData = await getApiKeyFromDB('elevenlabs');
+  if (!keyData) {
+    throw new BadRequestError('ElevenLabs API key not configured. Please add it in Admin Dashboard → API Keys.');
+  }
+
+  // Default voice ID (Rachel - a neutral female voice)
+  const voiceId = 'EXAVITQu4vr4xnSDxMaL';
+  
+  const response = await fetch(
+    `https://api.elevenlabs.io/v1/text-to-speech/${voiceId}`,
+    {
+      method: 'POST',
+      headers: {
+        'Accept': 'audio/mpeg',
+        'Content-Type': 'application/json',
+        'xi-api-key': keyData.apiKey,
+      },
+      body: JSON.stringify({
+        text: text,
+        model_id: modelId,
+        voice_settings: {
+          stability: 0.5,
+          similarity_boost: 0.75,
+        },
+      }),
+    }
+  );
+
+  if (!response.ok) {
+    const error = await response.text();
+    throw new BadRequestError(`ElevenLabs API error: ${error}`);
+  }
+
+  // Convert audio to base64
+  const audioBuffer = await response.arrayBuffer();
+  const base64Audio = Buffer.from(audioBuffer).toString('base64');
+  
+  return {
+    content: `🎵 **Audio Generated**\n\n[Audio Player]\ndata:audio/mpeg;base64,${base64Audio}\n\n*Generated using ElevenLabs ${modelId}*`,
+    tokensUsed: Math.ceil(text.length * 0.5), // ElevenLabs charges per character
+  };
+};
+
 // Chat with AI model (mock or real)
 export const chatWithModel = async (
   modelId: string,
@@ -97,9 +367,8 @@ export const chatWithModel = async (
 ) => {
   const model = await getModelById(modelId);
 
-  // For now, always use mock responses
-  // In production, check hasRealApiKey and call actual APIs
-  const useMock = !hasRealApiKey(model.provider);
+  // Check if real API key is available for this provider (from database)
+  const useMock = !(await hasRealApiKey(model.provider));
 
   if (useMock) {
     const mockResult = generateMockResponse(prompt, model.name, model.category);
@@ -117,9 +386,62 @@ export const chatWithModel = async (
     };
   }
 
-  // TODO: Implement real API calls when keys are available
-  // For now, throw an error to indicate not implemented
-  throw new BadRequestError(`Real API integration for ${model.provider} not yet implemented`);
+  // Call real API based on provider
+  try {
+    let result: { content: string; tokensUsed: number };
+
+    switch (model.provider) {
+      case 'openai':
+        result = await callOpenAI(model.modelId, prompt, conversationHistory, model.category);
+        break;
+      
+      case 'anthropic':
+        result = await callAnthropic(model.modelId, prompt, conversationHistory);
+        break;
+      
+      case 'google':
+        result = await callGoogle(model.modelId, prompt, conversationHistory);
+        break;
+      
+      case 'elevenlabs':
+        result = await callElevenLabs(model.modelId, prompt);
+        break;
+      
+      default:
+        throw new BadRequestError(`Unknown provider: ${model.provider}`);
+    }
+
+    return {
+      model: {
+        id: model.id,
+        name: model.name,
+        provider: model.provider,
+        category: model.category,
+      },
+      response: result.content,
+      tokensUsed: result.tokensUsed,
+      isMock: false,
+    };
+  } catch (error: any) {
+    // Log the error for debugging
+    console.error(`[AI Service] Error calling ${model.provider}:`, error.message);
+    
+    // If API call fails, fall back to mock with error notice
+    const mockResult = generateMockResponse(prompt, model.name, model.category);
+    
+    return {
+      model: {
+        id: model.id,
+        name: model.name,
+        provider: model.provider,
+        category: model.category,
+      },
+      response: `⚠️ **API Error**: ${error.message}\n\n---\n\n**Fallback Mock Response:**\n${mockResult.content}`,
+      tokensUsed: mockResult.tokensUsed,
+      isMock: true,
+      error: error.message,
+    };
+  }
 };
 
 // Calculate token cost

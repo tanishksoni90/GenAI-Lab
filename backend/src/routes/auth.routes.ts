@@ -21,6 +21,7 @@ router.post('/refresh-token', validate(refreshTokenSchema), authController.refre
 router.get('/me', authenticate, authController.getProfile);
 router.put('/me', authenticate, authController.updateProfile);
 router.post('/change-password', authenticate, authController.changePassword);
+router.post('/set-new-password', authenticate, authController.setNewPassword); // For forced password change
 router.post('/logout', authenticate, authController.logout);
 
 export default router;

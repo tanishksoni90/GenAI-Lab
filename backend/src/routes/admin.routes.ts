@@ -187,5 +187,10 @@ router.delete('/models/access/:id', adminController.removeModelAccess);
 router.get('/settings', adminController.getSettings);
 router.put('/settings', validate(updateSettingsSchema), adminController.updateSettings);
 
+// ==================== TOKEN MANAGEMENT ====================
+
+router.get('/tokens/exceeded', adminController.getExceededQuotaUsers);
+router.post('/tokens/fix-exceeded', adminController.fixExceededQuotas);
+
 export default router;
 

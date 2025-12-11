@@ -107,6 +107,21 @@ export const changePassword = async (
   }
 };
 
+// Set new password (forced password change after admin reset)
+export const setNewPassword = async (
+  req: Request,
+  res: Response,
+  next: NextFunction
+) => {
+  try {
+    const { newPassword } = req.body;
+    const result = await authService.setNewPassword(req.user!.id, newPassword);
+    return sendSuccess(res, result, 'Password set successfully');
+  } catch (error) {
+    next(error);
+  }
+};
+
 // Logout (client-side token removal, but we can log it)
 export const logout = async (
   req: Request,
