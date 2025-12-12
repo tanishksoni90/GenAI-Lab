@@ -2,7 +2,7 @@ import os
 from openai import OpenAI
 
 # --- Configuration ---
-API_KEY = "apikey-735e77664b3d4524996e4e00afe57a9f"  # Your Atlas Cloud API key
+API_KEY = "your_api_key"  # Your Atlas Cloud API key
 BASE_URL = "https://api.atlascloud.ai/v1"
 MODEL = "openai/gpt-oss-20b"
 
