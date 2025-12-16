@@ -62,6 +62,7 @@ coverage
 *.tmp
 *.temp
 .cache
+*.crdownload
 
 # TypeScript cache
 *.tsbuildinfo
