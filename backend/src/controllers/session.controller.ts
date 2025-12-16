@@ -147,12 +147,15 @@ export const sendMessageStreaming = async (
       }
     );
 
-    // Send done event with full result
+    // Send done event with full result including token usage and cost
     res.write(`data: ${JSON.stringify({
       type: 'done',
       userMessage: result.userMessage,
       assistantMessage: result.assistantMessage,
       tokensUsed: result.tokensUsed,
+      inputTokens: result.inputTokens,
+      outputTokens: result.outputTokens,
+      cost: result.cost,
       isMock: result.isMock,
     })}\n\n`);
 
