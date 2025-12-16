@@ -4,6 +4,7 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
 import SkyToggle from "@/components/ui/sky-toggle";
+import { MarkdownRenderer } from "@/components/ui/markdown-renderer";
 import { useNavigate, useParams, useSearchParams, useLocation } from "react-router-dom";
 import { useTheme } from "@/contexts/ThemeContext";
 import { useAuth } from "@/contexts/AuthContext";
@@ -16,7 +17,7 @@ import {
   useDashboardStats,
   useModels
 } from "@/hooks/useStudentData";
-import { Message } from "@/lib/api";
+import { Message, sessionsApi } from "@/lib/api";
 import { 
   ArrowLeft, Send, Plus, MessageSquare, EyeOff, Bot, 
   Sparkles, Zap, Code, Target, TrendingUp, AlertTriangle,
@@ -58,6 +59,7 @@ interface ChatMessage {
   };
   guidingQuestions?: string[];
   createdAt?: string;
+  isStreaming?: boolean;
 }
 
 const StudentChat = () => {
@@ -372,7 +374,7 @@ const StudentChat = () => {
   };
 
   const handleSendMessage = async () => {
-    if (!inputMessage.trim() || sendMessageMutation.isPending) return;
+    if (!inputMessage.trim() || isTyping) return;
 
     const messageContent = inputMessage;
     setInputMessage("");
@@ -395,109 +397,147 @@ const StudentChat = () => {
     }
 
     // Add optimistic user message to UI
+    const tempUserMessageId = `temp-user-${Date.now()}`;
     const tempUserMessage: ChatMessage = {
-      id: `temp-${Date.now()}`,
+      id: tempUserMessageId,
       role: "user",
       content: messageContent,
       timestamp: new Date().toLocaleTimeString(),
     };
-    setMessages(prev => [...prev, tempUserMessage]);
+    
+    // Add streaming assistant placeholder
+    const streamingMessageId = `streaming-${Date.now()}`;
+    const streamingMessage: ChatMessage = {
+      id: streamingMessageId,
+      role: "assistant",
+      content: "",
+      timestamp: new Date().toLocaleTimeString(),
+      isStreaming: true,
+    };
+    
+    setMessages(prev => [...prev, tempUserMessage, streamingMessage]);
     setIsTyping(true);
 
     try {
-      // Send message to backend
-      const result = await sendMessageMutation.mutateAsync({
-        sessionId: activeSessionId,
-        content: messageContent,
-      });
+      // Use streaming API
+      const stream = sessionsApi.sendMessageStreaming(activeSessionId, messageContent);
       
-      // Update messages with actual response from backend
-      setMessages(prev => {
-        // Remove temp message, add real user and assistant messages
-        const withoutTemp = prev.filter(m => m.id !== tempUserMessage.id);
-        const newMessages: ChatMessage[] = [...withoutTemp];
-        
-        // Add user message if present
-        if (result?.userMessage) {
-          const scoreResult = result.userMessage.scoreResult;
+      // Track accumulated streamed content
+      let streamedContent = '';
+      
+      for await (const event of stream) {
+        if (event.type === 'chunk') {
+          // Accumulate streamed content
+          streamedContent += event.content || '';
           
-          // Transform criteria array to scoreBreakdown object
-          let scoreBreakdown: Record<string, number> | undefined;
-          let criteriaDetails: Array<{ name: string; score: number; maxScore: number; feedback: string }> = [];
+          // Update streaming message content
+          setMessages(prev => prev.map(m => 
+            m.id === streamingMessageId 
+              ? { ...m, content: m.content + (event.content || '') }
+              : m
+          ));
+        } else if (event.type === 'done') {
+          // Finalize messages with actual data from backend
+          const result = event;
           
-          if (scoreResult?.criteria && Array.isArray(scoreResult.criteria)) {
-            scoreBreakdown = {};
-            criteriaDetails = scoreResult.criteria;
-            scoreResult.criteria.forEach((criterion: { name: string; score: number; maxScore: number; feedback: string }) => {
-              const key = criterion.name.toLowerCase().replace(/\s+/g, '');
-              scoreBreakdown![key] = Math.round((criterion.score / criterion.maxScore) * 100);
-            });
-          }
-
-          // Extract feedback - properly handle Gemini vs rule-based responses
-          let feedbackData: { strengths?: string[]; improvements?: string[]; biggestGap?: string; suggestion?: string } | undefined;
-          if (scoreResult) {
-            const isGemini = scoreResult.analysisSource === 'gemini';
+          setMessages(prev => {
+            // Get the streamed content from current messages as fallback
+            const currentStreamingMessage = prev.find(m => m.id === streamingMessageId);
+            const fallbackContent = currentStreamingMessage?.content || streamedContent;
             
-            if (isGemini) {
-              const highScoreCriteria = criteriaDetails.filter(c => c.score >= c.maxScore * 0.7);
-              const lowScoreCriteria = criteriaDetails.filter(c => c.score < c.maxScore * 0.7);
+            // Remove temp messages, add real user and assistant messages
+            const withoutTemp = prev.filter(m => m.id !== tempUserMessageId && m.id !== streamingMessageId);
+            const newMessages: ChatMessage[] = [...withoutTemp];
+            
+            // Add user message if present
+            if (result?.userMessage) {
+              const scoreResult = result.userMessage.scoreResult;
               
-              feedbackData = {
-                strengths: highScoreCriteria.map(c => `**${c.name}**: ${c.feedback}`),
-                improvements: lowScoreCriteria.map(c => `**${c.name}**: ${c.feedback}`),
-                suggestion: scoreResult.comparison || scoreResult.feedback,
-              };
+              // Transform criteria array to scoreBreakdown object
+              let scoreBreakdown: Record<string, number> | undefined;
+              let criteriaDetails: Array<{ name: string; score: number; maxScore: number; feedback: string }> = [];
               
-              if (typeof scoreResult.feedback === 'string' && lowScoreCriteria.length > 0) {
-                feedbackData.biggestGap = scoreResult.feedback;
+              if (scoreResult?.criteria && Array.isArray(scoreResult.criteria)) {
+                scoreBreakdown = {};
+                criteriaDetails = scoreResult.criteria;
+                scoreResult.criteria.forEach((criterion: { name: string; score: number; maxScore: number; feedback: string }) => {
+                  const key = criterion.name.toLowerCase().replace(/\s+/g, '');
+                  scoreBreakdown![key] = Math.round((criterion.score / criterion.maxScore) * 100);
+                });
               }
-            } else {
-              feedbackData = {
-                strengths: criteriaDetails.filter(c => c.score >= c.maxScore * 0.7).map(c => c.feedback),
-                improvements: criteriaDetails.filter(c => c.score < c.maxScore * 0.7).map(c => c.feedback),
-                suggestion: scoreResult.comparison || scoreResult.feedback,
-              };
-            }
-          }
 
-          newMessages.push({
-            id: result.userMessage.id || `user-${Date.now()}`,
-            role: 'user' as const,
-            content: result.userMessage.content || messageContent,
-            timestamp: result.userMessage.createdAt 
-              ? new Date(result.userMessage.createdAt).toLocaleTimeString()
-              : new Date().toLocaleTimeString(),
-            score: result.userMessage.score,
-            tokensUsed: result.userMessage.tokens,
-            feedback: feedbackData,
-            scoreBreakdown,
-            comparison: scoreResult?.comparison as ChatMessage['comparison'],
+              // Extract feedback - properly handle Gemini vs rule-based responses
+              let feedbackData: { strengths?: string[]; improvements?: string[]; biggestGap?: string; suggestion?: string } | undefined;
+              if (scoreResult) {
+                const isGemini = scoreResult.analysisSource === 'gemini';
+                
+                if (isGemini) {
+                  const highScoreCriteria = criteriaDetails.filter(c => c.score >= c.maxScore * 0.7);
+                  const lowScoreCriteria = criteriaDetails.filter(c => c.score < c.maxScore * 0.7);
+                  
+                  feedbackData = {
+                    strengths: highScoreCriteria.map(c => `**${c.name}**: ${c.feedback}`),
+                    improvements: lowScoreCriteria.map(c => `**${c.name}**: ${c.feedback}`),
+                    suggestion: scoreResult.comparison || scoreResult.feedback,
+                  };
+                  
+                  if (typeof scoreResult.feedback === 'string' && lowScoreCriteria.length > 0) {
+                    feedbackData.biggestGap = scoreResult.feedback;
+                  }
+                } else {
+                  feedbackData = {
+                    strengths: criteriaDetails.filter(c => c.score >= c.maxScore * 0.7).map(c => c.feedback),
+                    improvements: criteriaDetails.filter(c => c.score < c.maxScore * 0.7).map(c => c.feedback),
+                    suggestion: scoreResult.comparison || scoreResult.feedback,
+                  };
+                }
+              }
+
+              newMessages.push({
+                id: result.userMessage.id || `user-${Date.now()}`,
+                role: 'user' as const,
+                content: result.userMessage.content || messageContent,
+                timestamp: result.userMessage.createdAt 
+                  ? new Date(result.userMessage.createdAt).toLocaleTimeString()
+                  : new Date().toLocaleTimeString(),
+                score: result.userMessage.score,
+                tokensUsed: result.userMessage.tokens,
+                feedback: feedbackData,
+                scoreBreakdown,
+                comparison: scoreResult?.comparison as ChatMessage['comparison'],
+              });
+            }
+            
+            // Add assistant message - use streamed content as fallback
+            const assistantContent = result?.assistantMessage?.content || fallbackContent || 'Response received.';
+            newMessages.push({
+              id: result?.assistantMessage?.id || `assistant-${Date.now()}`,
+              role: 'assistant' as const,
+              content: assistantContent,
+              timestamp: result?.assistantMessage?.createdAt
+                ? new Date(result.assistantMessage.createdAt).toLocaleTimeString()
+                : new Date().toLocaleTimeString(),
+              tokensUsed: result?.assistantMessage?.tokens,
+            });
+            
+            return newMessages;
           });
+          
+          // Refetch session to get updated stats
+          refetchSession();
+        } else if (event.type === 'error') {
+          throw new Error(event.error);
         }
-        
-        // Add assistant message if present
-        if (result?.assistantMessage) {
-          newMessages.push({
-            id: result.assistantMessage.id || `assistant-${Date.now()}`,
-            role: 'assistant' as const,
-            content: result.assistantMessage.content || 'Response received.',
-            timestamp: result.assistantMessage.createdAt
-              ? new Date(result.assistantMessage.createdAt).toLocaleTimeString()
-              : new Date().toLocaleTimeString(),
-            tokensUsed: result.assistantMessage.tokens,
-          });
-        }
-        
-        return newMessages;
-      });
-      
-      // Refetch session to get updated stats
-      refetchSession();
+      }
     } catch (error) {
       console.error('Failed to send message:', error);
-      // Remove optimistic message on error
-      setMessages(prev => prev.filter(m => m.id !== tempUserMessage.id));
+      // Remove optimistic messages on error
+      setMessages(prev => prev.filter(m => m.id !== tempUserMessageId && m.id !== streamingMessageId));
+      toast({
+        title: "Error",
+        description: "Failed to send message. Please try again.",
+        variant: "destructive",
+      });
     } finally {
       setIsTyping(false);
     }
@@ -834,39 +874,20 @@ const StudentChat = () => {
                         : "glass-card border border-cyan-500/30 bg-cyan-500/5"
                       : "glass-card"
                   }`}>
-                    <div className="text-sm leading-relaxed whitespace-pre-wrap">
-                      {message.content.split('\n').map((line, i) => {
-                        if (line.startsWith('```')) return null;
-                        if (line.startsWith('•')) return <p key={i} className="my-1">{line}</p>;
-                        if (/^\d+\./.test(line)) return <p key={i} className="my-1">{line}</p>;
-                        if (line.includes('**')) {
-                          const parts = line.split(/\*\*(.*?)\*\*/);
-                          return (
-                            <p key={i} className="my-1">
-                              {parts.map((part, j) => 
-                                j % 2 === 1 ? <strong key={j} className="text-primary">{part}</strong> : part
-                              )}
-                            </p>
-                          );
-                        }
-                        return line ? <p key={i} className="my-1">{line}</p> : <br key={i} />;
-                      })}
-                      
-                      {message.content.includes('```') && (
-                        <div className="my-3 rounded-xl overflow-hidden glass">
-                          <div className="flex items-center justify-between px-4 py-2 bg-white/5 border-b border-white/5">
-                            <span className="text-xs font-medium text-muted-foreground">python</span>
-                            <Button variant="ghost" size="sm" className="h-6 text-xs hover:bg-white/5">
-                              <Copy className="w-3 h-3 mr-1" />
-                              Copy
-                            </Button>
-                          </div>
-                          <pre className="p-4 text-xs overflow-x-auto text-emerald-400 font-mono">
-                            <code>{message.content.match(/```[\s\S]*?\n([\s\S]*?)```/)?.[1] || ''}</code>
-                          </pre>
-                        </div>
-                      )}
-                    </div>
+                    {message.isStreaming && !message.content ? (
+                      <span className="text-sm text-muted-foreground">Connecting...</span>
+                    ) : message.role === "assistant" ? (
+                      <div className="relative">
+                        <MarkdownRenderer content={message.content} />
+                        {message.isStreaming && (
+                          <span className="inline-block w-2 h-4 ml-1 bg-cyan-400 animate-pulse" />
+                        )}
+                      </div>
+                    ) : (
+                      <div className="text-sm leading-relaxed whitespace-pre-wrap text-foreground">
+                        {message.content}
+                      </div>
+                    )}
                   </div>
 
                   <div className={`flex items-center gap-1 mt-2 opacity-0 group-hover:opacity-100 transition-opacity ${

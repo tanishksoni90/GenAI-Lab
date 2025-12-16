@@ -692,6 +692,7 @@ const StudentDashboard = () => {
                 { value: "overview", icon: LayoutGrid, label: "Overview" },
                 { value: "models", icon: Brain, label: "AI Models" },
                 { value: "agents", icon: Bot, label: "Agents" },
+                { value: "compare", icon: Zap, label: "Compare" },
                 { value: "leaderboard", icon: Trophy, label: "Leaderboard" },
                 { value: "artifacts", icon: Layers, label: "Artifacts" },
               ].map((tab) => (
@@ -1625,6 +1626,43 @@ Example: You are a friendly Python tutor. Explain concepts step-by-step with cod
                     ))}
                   </div>
                 )}
+              </CardContent>
+            </Card>
+          </TabsContent>
+
+          {/* COMPARE TAB */}
+          <TabsContent value="compare" className="mt-6">
+            <Card className="glass-card">
+              <CardContent className="p-8">
+                <div className="text-center max-w-xl mx-auto">
+                  <div className="w-20 h-20 rounded-2xl bg-gradient-to-br from-amber-500/20 to-orange-500/20 flex items-center justify-center mx-auto mb-6">
+                    <Zap className="w-10 h-10 text-amber-400" />
+                  </div>
+                  <h2 className="text-2xl font-bold mb-3">Multi-Model Comparison</h2>
+                  <p className="text-muted-foreground mb-6">
+                    Compare responses from multiple AI models side-by-side. Select models from the same category and see how they respond to your prompts differently.
+                  </p>
+                  <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
+                    {[
+                      { icon: MessageSquare, label: "Text Models", color: "text-blue-400" },
+                      { icon: ImageIcon, label: "Image Models", color: "text-purple-400" },
+                      { icon: Volume2, label: "Audio Models", color: "text-green-400" },
+                      { icon: Code, label: "Code Models", color: "text-cyan-400" },
+                    ].map((item, idx) => (
+                      <div key={idx} className="p-4 rounded-xl bg-white/5 border border-white/10">
+                        <item.icon className={`w-6 h-6 ${item.color} mx-auto mb-2`} />
+                        <p className="text-sm text-muted-foreground">{item.label}</p>
+                      </div>
+                    ))}
+                  </div>
+                  <Button 
+                    className="gradient-primary glow-primary font-semibold px-8"
+                    onClick={() => navigate('/student/compare')}
+                  >
+                    <Zap className="w-4 h-4 mr-2" />
+                    Open Compare Tool
+                  </Button>
+                </div>
               </CardContent>
             </Card>
           </TabsContent>

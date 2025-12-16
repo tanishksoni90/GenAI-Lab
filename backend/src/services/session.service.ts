@@ -2,6 +2,8 @@ import { prisma } from '../lib/prisma';
 import { NotFoundError, InsufficientTokensError, ForbiddenError } from '../utils/errors';
 import * as aiService from './ai.service';
 import * as scoringService from './scoring.service';
+import { StreamCallback } from './ai.service';
+import { calculateModelCostUSD, getModelPricing, pricingUtils } from '../config/pricing';
 
 // Helper to check if hard limit enforcement is enabled
 async function isHardLimitEnforced(): Promise<boolean> {
@@ -195,10 +197,15 @@ export const sendMessage = async (
     conversationHistory
   );
 
-  // Estimate tokens for user message
-  const userTokens = Math.ceil(content.length / 4);
+  // Calculate cost in USD using actual token counts from API
+  // Uses pricing config with per 1M token rates (industry standard)
+  const inputTokens = aiResponse.inputTokens;
+  const outputTokens = aiResponse.outputTokens;
+  const totalTokens = inputTokens + outputTokens;
+  const costUSD = calculateModelCostUSD(session.model.modelId, inputTokens, outputTokens);
 
-  // Create user message
+  // Create user message with input tokens and cost
+  const userInputCost = calculateModelCostUSD(session.model.modelId, inputTokens, 0);
   const userMessage = await prisma.message.create({
     data: {
       sessionId,
@@ -206,21 +213,28 @@ export const sendMessage = async (
       content,
       score: scoreResult.totalScore,
       feedback: JSON.stringify(scoreResult),
-      tokens: userTokens,
+      inputTokens: inputTokens,
+      outputTokens: 0,
+      tokens: inputTokens, // Legacy field
+      cost: userInputCost,
     },
   });
 
-  // Create assistant message
+  // Create assistant message with output tokens and cost
+  const assistantOutputCost = calculateModelCostUSD(session.model.modelId, 0, outputTokens);
   const assistantMessage = await prisma.message.create({
     data: {
       sessionId,
       role: 'assistant',
       content: aiResponse.response,
-      tokens: aiResponse.tokensUsed - userTokens,
+      inputTokens: 0,
+      outputTokens: outputTokens,
+      tokens: outputTokens, // Legacy field
+      cost: assistantOutputCost,
     },
   });
 
-  // Update session stats
+  // Update session stats with separate input/output tracking
   const allScores = [...session.messages.filter(m => m.score).map(m => m.score!), scoreResult.totalScore];
   const avgScore = scoringService.calculateSessionScore(allScores);
 
@@ -230,7 +244,10 @@ export const sendMessage = async (
       promptCount: { increment: 1 },
       totalScore: { increment: scoreResult.totalScore },
       avgScore,
-      tokensUsed: { increment: aiResponse.tokensUsed },
+      inputTokens: { increment: inputTokens },
+      outputTokens: { increment: outputTokens },
+      tokensUsed: { increment: totalTokens }, // Legacy field
+      totalCost: { increment: costUSD },
       updatedAt: new Date(),
     },
   });
@@ -238,26 +255,31 @@ export const sendMessage = async (
   // Deduct tokens from user (cap at quota if hard limit is enabled)
   const currentUser = await prisma.user.findUnique({
     where: { id: userId },
-    select: { tokenQuota: true, tokenUsed: true },
+    select: { tokenQuota: true, tokenUsed: true, budgetLimit: true, budgetUsed: true },
   });
   
   const hardLimitEnabled = await isHardLimitEnforced();
-  let tokensToAdd = aiResponse.tokensUsed;
   
-  // If hard limit is enabled, cap the token usage at the quota
+  // Convert USD cost to virtual tokens for consistent quota tracking
+  // Formula: Virtual Tokens = (USD Spent / Budget Limit USD) × Display Tokens
+  let virtualTokensToAdd = pricingUtils.usdToVirtualTokens(costUSD);
+  
+  // If hard limit is enabled, cap the virtual token usage at the quota
   if (hardLimitEnabled && currentUser) {
     const remainingQuota = Math.max(0, currentUser.tokenQuota - currentUser.tokenUsed);
-    tokensToAdd = Math.min(tokensToAdd, remainingQuota);
+    virtualTokensToAdd = Math.min(virtualTokensToAdd, remainingQuota);
   }
 
+  // Update user's budget (cost in USD) and virtual tokens
   await prisma.user.update({
     where: { id: userId },
     data: {
-      tokenUsed: { increment: tokensToAdd },
+      tokenUsed: { increment: virtualTokensToAdd },
+      budgetUsed: { increment: costUSD },
     },
   });
 
-  // Update agent stats if applicable
+  // Update agent stats if applicable (use real tokens for agent stats)
   if (session.agentId) {
     await prisma.agent.update({
       where: { id: session.agentId },
@@ -349,5 +371,162 @@ export const endSession = async (sessionId: string, userId: string) => {
     where: { id: sessionId },
     data: { isActive: false },
   });
+};
+
+// Send a message with streaming response
+export const sendMessageStreaming = async (
+  sessionId: string,
+  userId: string,
+  content: string,
+  onChunk: StreamCallback
+): Promise<{
+  userMessage: any;
+  assistantMessage: any;
+  tokensUsed: number;
+  inputTokens: number;
+  outputTokens: number;
+  cost: number;
+  isMock: boolean;
+}> => {
+  // Get session with messages
+  const session = await prisma.session.findUnique({
+    where: { id: sessionId },
+    include: {
+      model: true,
+      agent: true,
+      messages: {
+        orderBy: { createdAt: 'asc' },
+      },
+    },
+  });
+
+  if (!session) {
+    throw new NotFoundError('Session not found');
+  }
+
+  if (session.userId !== userId) {
+    throw new ForbiddenError('Not authorized to access this session');
+  }
+
+  // Check user has tokens (with hard limit enforcement)
+  const tokenCheck = await checkTokenAvailability(userId);
+  if (!tokenCheck.available) {
+    throw new InsufficientTokensError();
+  }
+
+  // Prepare conversation history
+  const conversationHistory = session.messages.map(m => ({
+    role: m.role,
+    content: m.content,
+  }));
+
+  // Score the user's prompt using Gemini AI
+  const scoreResult = await scoringService.scorePrompt(content, conversationHistory, userId);
+
+  // Stream AI response first to get actual token counts
+  let fullResponse = '';
+  const streamResult = await aiService.streamWithModel(
+    session.modelId,
+    content,
+    conversationHistory,
+    (chunk: string, done: boolean) => {
+      if (!done) {
+        fullResponse += chunk;
+      }
+      onChunk(chunk, done);
+    }
+  );
+
+  // Calculate cost in USD using actual token counts from API
+  const inputTokens = streamResult.inputTokens;
+  const outputTokens = streamResult.outputTokens;
+  const totalTokens = inputTokens + outputTokens;
+  const costUSD = calculateModelCostUSD(session.model.modelId, inputTokens, outputTokens);
+
+  // Create user message with input tokens and cost
+  const userInputCost = calculateModelCostUSD(session.model.modelId, inputTokens, 0);
+  const userMessage = await prisma.message.create({
+    data: {
+      sessionId,
+      role: 'user',
+      content,
+      score: scoreResult.totalScore,
+      feedback: JSON.stringify(scoreResult),
+      inputTokens: inputTokens,
+      outputTokens: 0,
+      tokens: inputTokens, // Legacy
+      cost: userInputCost,
+    },
+  });
+
+  // Create assistant message with output tokens and cost
+  const assistantOutputCost = calculateModelCostUSD(session.model.modelId, 0, outputTokens);
+  const assistantMessage = await prisma.message.create({
+    data: {
+      sessionId,
+      role: 'assistant',
+      content: fullResponse,
+      inputTokens: 0,
+      outputTokens: outputTokens,
+      tokens: outputTokens, // Legacy
+      cost: assistantOutputCost,
+    },
+  });
+
+  // Update session stats with separate input/output tracking
+  const allScores = [...session.messages.filter(m => m.score).map(m => m.score!), scoreResult.totalScore];
+  const avgScore = scoringService.calculateSessionScore(allScores);
+
+  await prisma.session.update({
+    where: { id: sessionId },
+    data: {
+      promptCount: { increment: 1 },
+      totalScore: { increment: scoreResult.totalScore },
+      avgScore,
+      inputTokens: { increment: inputTokens },
+      outputTokens: { increment: outputTokens },
+      tokensUsed: { increment: totalTokens }, // Legacy
+      totalCost: { increment: costUSD },
+      updatedAt: new Date(),
+    },
+  });
+
+  // Update user token usage
+  const currentUser = await prisma.user.findUnique({
+    where: { id: userId },
+    select: { tokenQuota: true, tokenUsed: true, budgetLimit: true, budgetUsed: true },
+  });
+  
+  const hardLimitEnabled = await isHardLimitEnforced();
+  
+  // Convert USD cost to virtual tokens for consistent quota tracking
+  let virtualTokensToAdd = pricingUtils.usdToVirtualTokens(costUSD);
+  
+  if (hardLimitEnabled && currentUser) {
+    const remainingQuota = Math.max(0, currentUser.tokenQuota - currentUser.tokenUsed);
+    virtualTokensToAdd = Math.min(virtualTokensToAdd, remainingQuota);
+  }
+
+  // Update user's budget (cost in USD) and virtual tokens
+  await prisma.user.update({
+    where: { id: userId },
+    data: {
+      tokenUsed: { increment: virtualTokensToAdd },
+      budgetUsed: { increment: costUSD },
+    },
+  });
+
+  return {
+    userMessage: {
+      ...userMessage,
+      scoreResult,
+    },
+    assistantMessage,
+    tokensUsed: totalTokens,
+    inputTokens,
+    outputTokens,
+    cost: costUSD,
+    isMock: streamResult.isMock,
+  };
 };
 

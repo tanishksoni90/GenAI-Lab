@@ -13,6 +13,7 @@ import sessionRoutes from './routes/session.routes';
 import agentRoutes from './routes/agent.routes';
 import artifactRoutes from './routes/artifact.routes';
 import adminRoutes from './routes/admin.routes';
+import comparisonRoutes from './routes/comparison.routes';
 
 // Create Express app
 const app = express();
@@ -28,10 +29,10 @@ app.use(cors({
   allowedHeaders: ['Content-Type', 'Authorization'],
 }));
 
-// Rate limiting - higher limits for development
+// Rate limiting - protect against abuse
 const limiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 1000, // Limit each IP to 1000 requests per window (increased for dev)
+  max: 100, // Limit each IP to 100 requests per 15-minute window
   message: { success: false, error: 'Too many requests, please try again later' },
   standardHeaders: true,
   legacyHeaders: false,
@@ -59,6 +60,7 @@ app.use('/api/sessions', sessionRoutes);
 app.use('/api/agents', agentRoutes);
 app.use('/api/artifacts', artifactRoutes);
 app.use('/api/admin', adminRoutes);
+app.use('/api/comparison', comparisonRoutes);
 
 // 404 handler
 app.use(notFoundHandler);

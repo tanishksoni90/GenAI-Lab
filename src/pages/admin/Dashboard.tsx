@@ -770,11 +770,11 @@ const AdminDashboard = () => {
                   monthly: analytics?.sessions?.monthly || analytics?.overview?.totalSessions || 0 
                 },
                 { 
-                  label: "Costs", 
+                  label: "Costs (USD)", 
                   icon: DollarSign, 
-                  daily: `$${(analytics?.costs?.daily || 0).toFixed(2)}`, 
-                  weekly: `$${(analytics?.costs?.weekly || 0).toFixed(2)}`, 
-                  monthly: `$${(analytics?.costs?.monthly || 0).toFixed(2)}`,
+                  daily: `$${(analytics?.costs?.daily || 0).toFixed(4)}`, 
+                  weekly: `$${(analytics?.costs?.weekly || 0).toFixed(4)}`, 
+                  monthly: `$${(analytics?.costs?.monthly || 0).toFixed(4)}`,
                   isCurrency: true
                 },
                 { 
@@ -2732,13 +2732,14 @@ const AdminDashboard = () => {
                 <Card className="glass-card">
                   <CardHeader>
                     <CardTitle className="text-base">Token Usage by Period</CardTitle>
-                    <CardDescription className="text-xs">Breakdown of token consumption</CardDescription>
+                    <CardDescription className="text-xs">Breakdown of token consumption (Chat + Compare)</CardDescription>
                   </CardHeader>
                   <CardContent className="space-y-4">
                     <div className="flex items-center justify-between p-3 rounded-lg" style={{ backgroundColor: 'rgba(59, 130, 246, 0.1)' }}>
                       <div>
                         <p className="text-sm text-muted-foreground">Today</p>
                         <p className="text-lg font-bold text-blue-400">{(analytics?.tokensUsed?.daily || 0).toLocaleString()}</p>
+                        <p className="text-xs text-muted-foreground">Chat: {(analytics?.tokensUsed?.sessions?.daily || 0).toLocaleString()} | Compare: {(analytics?.tokensUsed?.comparisons?.daily || 0).toLocaleString()}</p>
                       </div>
                       <Activity className="w-5 h-5 text-blue-400" />
                     </div>
@@ -2746,6 +2747,7 @@ const AdminDashboard = () => {
                       <div>
                         <p className="text-sm text-muted-foreground">This Week</p>
                         <p className="text-lg font-bold text-purple-400">{(analytics?.tokensUsed?.weekly || 0).toLocaleString()}</p>
+                        <p className="text-xs text-muted-foreground">Chat: {(analytics?.tokensUsed?.sessions?.weekly || 0).toLocaleString()} | Compare: {(analytics?.tokensUsed?.comparisons?.weekly || 0).toLocaleString()}</p>
                       </div>
                       <TrendingUp className="w-5 h-5 text-purple-400" />
                     </div>
@@ -2753,6 +2755,7 @@ const AdminDashboard = () => {
                       <div>
                         <p className="text-sm text-muted-foreground">This Month</p>
                         <p className="text-lg font-bold text-emerald-400">{(analytics?.tokensUsed?.monthly || 0).toLocaleString()}</p>
+                        <p className="text-xs text-muted-foreground">Chat: {(analytics?.tokensUsed?.sessions?.monthly || 0).toLocaleString()} | Compare: {(analytics?.tokensUsed?.comparisons?.monthly || 0).toLocaleString()}</p>
                       </div>
                       <BarChart3 className="w-5 h-5 text-emerald-400" />
                     </div>
@@ -2780,8 +2783,16 @@ const AdminDashboard = () => {
                       </span>
                     </div>
                     <div className="flex items-center justify-between">
-                      <span className="text-sm text-muted-foreground">Total Sessions</span>
+                      <span className="text-sm text-muted-foreground">Chat Sessions</span>
                       <span className="font-medium">{(analytics?.overview?.totalSessions || 0).toLocaleString()}</span>
+                    </div>
+                    <div className="flex items-center justify-between">
+                      <span className="text-sm text-muted-foreground">Compare Sessions</span>
+                      <span className="font-medium">{(analytics?.overview?.totalComparisonSessions || 0).toLocaleString()}</span>
+                    </div>
+                    <div className="flex items-center justify-between">
+                      <span className="text-sm text-muted-foreground">Compare Tokens</span>
+                      <span className="font-medium">{(analytics?.tokensUsed?.comparisons?.total || 0).toLocaleString()}</span>
                     </div>
                     <div className="flex items-center justify-between">
                       <span className="text-sm text-muted-foreground">Usage Rate</span>
@@ -3016,11 +3027,13 @@ const AdminDashboard = () => {
                   <Card className="glass-card">
                     <CardContent className="p-4">
                       <div className="flex items-center justify-between mb-2">
-                        <span className="text-sm text-muted-foreground">Total Cost</span>
+                        <span className="text-sm text-muted-foreground">Total Cost (USD)</span>
                         <DollarSign className="w-4 h-4 text-muted-foreground" />
                       </div>
-                      <p className="text-2xl font-bold">${(analytics?.costs?.total || 0).toFixed(2)}</p>
-                      <p className="text-xs text-muted-foreground mt-1">All-time platform cost</p>
+                      <p className="text-2xl font-bold">${(analytics?.costs?.total || 0).toFixed(4)}</p>
+                      <p className="text-xs text-muted-foreground mt-1">
+                        ≈ ₹{(analytics?.costs?.inrEquivalent?.total || (analytics?.costs?.total || 0) * 84).toFixed(2)} INR
+                      </p>
                     </CardContent>
                   </Card>
                   <Card className="glass-card">
@@ -3030,7 +3043,7 @@ const AdminDashboard = () => {
                         <TrendingUp className="w-4 h-4 text-muted-foreground" />
                       </div>
                       <p className="text-2xl font-bold">{(analytics?.overview?.totalSessions || 0).toLocaleString()}</p>
-                      <p className="text-xs text-muted-foreground mt-1">All-time sessions</p>
+                      <p className="text-xs text-muted-foreground mt-1">Chat: {(analytics?.overview?.totalSessions || 0).toLocaleString()} | Compare: {(analytics?.overview?.totalComparisonSessions || 0).toLocaleString()}</p>
                     </CardContent>
                   </Card>
                   <Card className="glass-card">

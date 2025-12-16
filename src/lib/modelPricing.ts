@@ -1,70 +1,79 @@
-// Model pricing configuration
-// Text models: charged per token
-// Image models: charged per image generated
-// Audio models: charged per character/request
+// Model pricing configuration - All prices in USD
+// Text models: charged per 1M tokens (USD)
+// Image models: charged per image generated (USD)
+// Audio models: charged per 1K characters (USD)
 
 // ==================== PRICING CONSTANTS ====================
 // These values define the business model
 
 export const PRICING_CONFIG = {
   // Student pricing
-  ENROLLMENT_FEE: 2000,        // What student pays (₹2,000)
-  BUDGET_LIMIT: 1500,          // Actual API budget per student (₹1,500)
-  DISPLAY_TOKENS: 50000,       // Virtual tokens shown to student (50,000)
+  ENROLLMENT_FEE_INR: 2000,      // What student pays (₹2,000)
+  BUDGET_LIMIT_USD: 18,          // Actual API budget per student (~$18 USD)
+  DISPLAY_TOKENS: 50000,         // Virtual tokens shown to student (50,000)
+  USD_TO_INR: 84,                // Exchange rate for display purposes
   
-  // Profit margin: ₹500 per student (ENROLLMENT_FEE - BUDGET_LIMIT)
+  // Business model: ₹2000 enrollment → $18 API budget (~₹1512 at 84 INR/USD)
+  // Profit margin: ~₹488 per student
 };
 
 // ==================== CONVERSION UTILITIES ====================
 
 export const pricingUtils = {
   /**
-   * Convert actual INR spent to virtual tokens used
-   * Formula: Virtual Tokens Used = (Actual ₹ Spent / BUDGET_LIMIT) × DISPLAY_TOKENS
+   * Convert actual USD spent to virtual tokens used
+   * Formula: Virtual Tokens Used = (USD Spent / BUDGET_LIMIT_USD) × DISPLAY_TOKENS
    */
-  inrToVirtualTokens(inrSpent: number): number {
-    return Math.round((inrSpent / PRICING_CONFIG.BUDGET_LIMIT) * PRICING_CONFIG.DISPLAY_TOKENS);
+  usdToVirtualTokens(usdSpent: number): number {
+    return Math.round((usdSpent / PRICING_CONFIG.BUDGET_LIMIT_USD) * PRICING_CONFIG.DISPLAY_TOKENS);
   },
 
   /**
-   * Convert virtual tokens to INR equivalent
-   * Formula: INR = (Virtual Tokens / DISPLAY_TOKENS) × BUDGET_LIMIT
+   * Convert virtual tokens to USD equivalent
+   * Formula: USD = (Virtual Tokens / DISPLAY_TOKENS) × BUDGET_LIMIT_USD
    */
-  virtualTokensToInr(virtualTokens: number): number {
-    return (virtualTokens / PRICING_CONFIG.DISPLAY_TOKENS) * PRICING_CONFIG.BUDGET_LIMIT;
+  virtualTokensToUsd(virtualTokens: number): number {
+    return (virtualTokens / PRICING_CONFIG.DISPLAY_TOKENS) * PRICING_CONFIG.BUDGET_LIMIT_USD;
   },
 
   /**
-   * Calculate remaining virtual tokens from budget used
+   * Convert USD to INR for display
    */
-  getRemainingVirtualTokens(budgetUsed: number): number {
-    const used = pricingUtils.inrToVirtualTokens(budgetUsed);
+  usdToInr(usd: number): number {
+    return usd * PRICING_CONFIG.USD_TO_INR;
+  },
+
+  /**
+   * Calculate remaining virtual tokens from budget used (USD)
+   */
+  getRemainingVirtualTokens(budgetUsedUSD: number): number {
+    const used = pricingUtils.usdToVirtualTokens(budgetUsedUSD);
     return Math.max(0, PRICING_CONFIG.DISPLAY_TOKENS - used);
   },
 
   /**
-   * Calculate remaining budget in INR
+   * Calculate remaining budget in USD
    */
-  getRemainingBudget(budgetUsed: number): number {
-    return Math.max(0, PRICING_CONFIG.BUDGET_LIMIT - budgetUsed);
+  getRemainingBudgetUSD(budgetUsedUSD: number): number {
+    return Math.max(0, PRICING_CONFIG.BUDGET_LIMIT_USD - budgetUsedUSD);
   },
 
   /**
    * Calculate usage percentage
    */
-  getUsagePercentage(budgetUsed: number): number {
-    return Math.min(100, (budgetUsed / PRICING_CONFIG.BUDGET_LIMIT) * 100);
+  getUsagePercentage(budgetUsedUSD: number): number {
+    return Math.min(100, (budgetUsedUSD / PRICING_CONFIG.BUDGET_LIMIT_USD) * 100);
   },
 
   /**
    * Check if student has budget remaining
    */
-  hasBudget(budgetUsed: number): boolean {
-    return budgetUsed < PRICING_CONFIG.BUDGET_LIMIT;
+  hasBudget(budgetUsedUSD: number): boolean {
+    return budgetUsedUSD < PRICING_CONFIG.BUDGET_LIMIT_USD;
   },
 };
 
-// ==================== MODEL PRICING ====================
+// ==================== MODEL PRICING (USD per 1M tokens) ====================
 
 export interface ModelPricing {
   id: string;
@@ -72,24 +81,24 @@ export interface ModelPricing {
   provider: string;
   category: 'text' | 'image' | 'audio' | 'multimodal' | 'code';
   pricingType: 'token' | 'per_request' | 'per_character';
-  // For token-based: cost per 1000 tokens in INR
-  // For per_request: cost per request in INR
-  // For per_character: cost per 1000 characters in INR
-  inputCostINR: number;   // INR per 1K input tokens
-  outputCostINR: number;  // INR per 1K output tokens
-  requestCostINR?: number; // INR per request (for image/audio)
+  // For token-based: USD per 1M tokens
+  // For per_request: USD per request
+  // For per_character: USD per 1K characters
+  inputPer1M: number;     // USD per 1M input tokens
+  outputPer1M: number;    // USD per 1M output tokens
+  requestCost?: number;   // USD per request (for image/audio)
 }
 
 export const modelPricing: Record<string, ModelPricing> = {
-  // OpenAI Text Models - Token based (INR per 1K tokens)
+  // OpenAI Text Models - USD per 1M tokens
   'gpt-4': {
     id: 'gpt-4',
     name: 'GPT-4',
     provider: 'OpenAI',
     category: 'text',
     pricingType: 'token',
-    inputCostINR: 2.50,
-    outputCostINR: 7.50,
+    inputPer1M: 30.00,
+    outputPer1M: 60.00,
   },
   'gpt-4o': {
     id: 'gpt-4o',
@@ -97,8 +106,8 @@ export const modelPricing: Record<string, ModelPricing> = {
     provider: 'OpenAI',
     category: 'multimodal',
     pricingType: 'token',
-    inputCostINR: 0.42,
-    outputCostINR: 1.25,
+    inputPer1M: 2.50,
+    outputPer1M: 10.00,
   },
   'gpt-4o-mini': {
     id: 'gpt-4o-mini',
@@ -106,8 +115,8 @@ export const modelPricing: Record<string, ModelPricing> = {
     provider: 'OpenAI',
     category: 'multimodal',
     pricingType: 'token',
-    inputCostINR: 0.013,
-    outputCostINR: 0.05,
+    inputPer1M: 0.15,
+    outputPer1M: 0.60,
   },
   'gpt-4.1-mini': {
     id: 'gpt-4.1-mini',
@@ -115,8 +124,8 @@ export const modelPricing: Record<string, ModelPricing> = {
     provider: 'OpenAI',
     category: 'text',
     pricingType: 'token',
-    inputCostINR: 0.013,
-    outputCostINR: 0.05,
+    inputPer1M: 0.15,
+    outputPer1M: 0.60,
   },
   'gpt-3.5-turbo': {
     id: 'gpt-3.5-turbo',
@@ -124,19 +133,19 @@ export const modelPricing: Record<string, ModelPricing> = {
     provider: 'OpenAI',
     category: 'text',
     pricingType: 'token',
-    inputCostINR: 0.042,
-    outputCostINR: 0.125,
+    inputPer1M: 0.50,
+    outputPer1M: 1.50,
   },
   
-  // Anthropic Models
+  // Anthropic Models - USD per 1M tokens
   'claude-opus-4.1': {
     id: 'claude-opus-4.1',
     name: 'Claude Opus 4.1',
     provider: 'Anthropic',
     category: 'text',
     pricingType: 'token',
-    inputCostINR: 1.25,
-    outputCostINR: 6.25,
+    inputPer1M: 15.00,
+    outputPer1M: 75.00,
   },
   'claude-sonnet-4.5': {
     id: 'claude-sonnet-4.5',
@@ -144,8 +153,8 @@ export const modelPricing: Record<string, ModelPricing> = {
     provider: 'Anthropic',
     category: 'text',
     pricingType: 'token',
-    inputCostINR: 0.25,
-    outputCostINR: 1.25,
+    inputPer1M: 3.00,
+    outputPer1M: 15.00,
   },
   'claude-haiku-4.5': {
     id: 'claude-haiku-4.5',
@@ -153,19 +162,19 @@ export const modelPricing: Record<string, ModelPricing> = {
     provider: 'Anthropic',
     category: 'text',
     pricingType: 'token',
-    inputCostINR: 0.067,
-    outputCostINR: 0.33,
+    inputPer1M: 0.25,
+    outputPer1M: 1.25,
   },
   
-  // Google Models
+  // Google Models - USD per 1M tokens
   'gemini-2.0-flash': {
     id: 'gemini-2.0-flash',
     name: 'Gemini 2.0 Flash',
     provider: 'Google',
     category: 'multimodal',
     pricingType: 'token',
-    inputCostINR: 0.006,
-    outputCostINR: 0.025,
+    inputPer1M: 0.10,
+    outputPer1M: 0.40,
   },
   'gemini-2.0-flash-lite': {
     id: 'gemini-2.0-flash-lite',
@@ -173,8 +182,8 @@ export const modelPricing: Record<string, ModelPricing> = {
     provider: 'Google',
     category: 'multimodal',
     pricingType: 'token',
-    inputCostINR: 0.004,
-    outputCostINR: 0.017,
+    inputPer1M: 0.075,
+    outputPer1M: 0.30,
   },
   'gemini-2.5-flash-lite': {
     id: 'gemini-2.5-flash-lite',
@@ -182,37 +191,37 @@ export const modelPricing: Record<string, ModelPricing> = {
     provider: 'Google',
     category: 'multimodal',
     pricingType: 'token',
-    inputCostINR: 0.004,
-    outputCostINR: 0.017,
+    inputPer1M: 0.075,
+    outputPer1M: 0.30,
   },
   
-  // Image Models - Per request based (INR per image)
+  // Image Models - USD per request
   'dall-e-3': {
     id: 'dall-e-3',
     name: 'DALL-E 3',
     provider: 'OpenAI',
     category: 'image',
     pricingType: 'per_request',
-    inputCostINR: 0,
-    outputCostINR: 0,
-    requestCostINR: 3.35, // ~$0.04 per image
+    inputPer1M: 0,
+    outputPer1M: 0,
+    requestCost: 0.04, // $0.04 per image (1024x1024)
   },
   
-  // Audio Models - Per character based (INR per request/1K chars)
+  // Audio Models - USD per 1K characters
   'eleven-multilingual-v2': {
     id: 'eleven-multilingual-v2',
     name: 'Eleven Multilingual v2',
     provider: 'ElevenLabs',
     category: 'audio',
     pricingType: 'per_character',
-    inputCostINR: 0,
-    outputCostINR: 0,
-    requestCostINR: 0.25, // per 1K characters
+    inputPer1M: 0,
+    outputPer1M: 0,
+    requestCost: 0.00024, // $0.00024 per character (~$0.24 per 1K chars)
   },
 };
 
-// Calculate cost in INR for a request
-export function calculateRequestCostINR(
+// Calculate cost in USD for a request
+export function calculateRequestCostUSD(
   modelId: string,
   inputTokens: number,
   outputTokens: number,
@@ -226,16 +235,16 @@ export function calculateRequestCostINR(
   
   switch (pricing.pricingType) {
     case 'token':
-      const inputCost = (inputTokens / 1000) * pricing.inputCostINR;
-      const outputCost = (outputTokens / 1000) * pricing.outputCostINR;
+      const inputCost = (inputTokens / 1_000_000) * pricing.inputPer1M;
+      const outputCost = (outputTokens / 1_000_000) * pricing.outputPer1M;
       return inputCost + outputCost;
     
     case 'per_request':
-      return pricing.requestCostINR || 0;
+      return pricing.requestCost || 0;
     
     case 'per_character':
       const chars = characterCount || inputTokens * 4; // Estimate if not provided
-      return (chars / 1000) * (pricing.requestCostINR || 0);
+      return chars * (pricing.requestCost || 0);
     
     default:
       return 0;
@@ -243,36 +252,50 @@ export function calculateRequestCostINR(
 }
 
 // Calculate virtual tokens deducted for display
-export function calculateVirtualTokensUsed(costINR: number): number {
-  return pricingUtils.inrToVirtualTokens(costINR);
+export function calculateVirtualTokensUsed(costUSD: number): number {
+  return pricingUtils.usdToVirtualTokens(costUSD);
 }
 
-// Get display text for pricing type
+// Get display text for pricing type (shows USD)
 export function getPricingDisplayText(modelId: string): string {
   const pricing = modelPricing[modelId];
   if (!pricing) return 'per request';
   
   switch (pricing.pricingType) {
     case 'token':
-      return `₹${(pricing.inputCostINR + pricing.outputCostINR).toFixed(2)}/1K tokens`;
+      // Show cost per 1K tokens for readability
+      const per1K = ((pricing.inputPer1M + pricing.outputPer1M) / 2) / 1000;
+      return `$${per1K.toFixed(4)}/1K tokens`;
     case 'per_request':
-      return `₹${pricing.requestCostINR?.toFixed(2)}/image`;
+      return `$${pricing.requestCost?.toFixed(2)}/image`;
     case 'per_character':
-      return `₹${pricing.requestCostINR?.toFixed(2)}/1K chars`;
+      // Show per 1K chars
+      const per1KChars = (pricing.requestCost || 0) * 1000;
+      return `$${per1KChars.toFixed(2)}/1K chars`;
     default:
       return 'per request';
   }
 }
 
 // Backward compatible alias - returns virtual tokens for display
-// This converts the INR cost to virtual tokens for the UI
+// This converts the USD cost to virtual tokens for the UI
 export function calculateRequestCost(
   modelId: string,
   inputTokens: number,
   outputTokens: number,
   characterCount?: number
 ): number {
-  const costINR = calculateRequestCostINR(modelId, inputTokens, outputTokens, characterCount);
-  return calculateVirtualTokensUsed(costINR);
+  const costUSD = calculateRequestCostUSD(modelId, inputTokens, outputTokens, characterCount);
+  return calculateVirtualTokensUsed(costUSD);
 }
 
+// Legacy aliases for backward compatibility
+export const calculateRequestCostINR = (
+  modelId: string,
+  inputTokens: number,
+  outputTokens: number,
+  characterCount?: number
+): number => {
+  const costUSD = calculateRequestCostUSD(modelId, inputTokens, outputTokens, characterCount);
+  return pricingUtils.usdToInr(costUSD);
+};

@@ -245,13 +245,15 @@ export const login = async (input: LoginInput): Promise<AuthResponse> => {
     },
   });
   
-  // Remove password from response
-  const { password: _, mustChangePassword, ...userWithoutPassword } = user;
+  // Remove password from response, keep mustChangePassword in user object
+  const { password: _, ...userWithoutPassword } = user;
   
   return { 
-    user: userWithoutPassword,
+    user: {
+      ...userWithoutPassword,
+      mustChangePassword: userWithoutPassword.mustChangePassword || false,
+    },
     tokens,
-    mustChangePassword: mustChangePassword || false,
   };
 };
 

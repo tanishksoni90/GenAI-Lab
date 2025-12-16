@@ -79,13 +79,13 @@ interface ConversationMessage {
 }
 
 /**
- * Calculate the cost of Gemini API usage in INR
+ * Calculate the cost of Gemini API usage in USD
+ * NOTE: budgetUsed is stored in USD across the entire codebase
  */
-function calculateCostInINR(inputTokens: number, outputTokens: number): number {
+function calculateCostInUSD(inputTokens: number, outputTokens: number): number {
   const inputCostUSD = (inputTokens / 1_000_000) * INPUT_COST_PER_MILLION;
   const outputCostUSD = (outputTokens / 1_000_000) * OUTPUT_COST_PER_MILLION;
-  const totalUSD = inputCostUSD + outputCostUSD;
-  return totalUSD * config.pricing.usdToInr;
+  return inputCostUSD + outputCostUSD;
 }
 
 /**
@@ -97,14 +97,15 @@ function estimateTokens(text: string): number {
 
 /**
  * Update user's budget in the database (hidden from session tokens)
+ * NOTE: costUSD should be in USD to match budgetUsed storage format
  */
-async function deductAnalysisCost(userId: string, costINR: number): Promise<void> {
+async function deductAnalysisCost(userId: string, costUSD: number): Promise<void> {
   try {
     await prisma.user.update({
       where: { id: userId },
       data: {
         budgetUsed: {
-          increment: costINR,
+          increment: costUSD,
         },
       },
     });
@@ -194,16 +195,16 @@ Respond with ONLY a valid JSON object in this exact format, no markdown code blo
 
     console.log(`[Gemini Analysis] Received ${text.length}-char response`);
 
-    // Calculate cost and deduct from user budget
+    // Calculate cost and deduct from user budget (in USD to match budgetUsed storage)
     const inputTokens = estimateTokens(analysisPrompt);
     const outputTokens = estimateTokens(text);
-    const costINR = calculateCostInINR(inputTokens, outputTokens);
+    const costUSD = calculateCostInUSD(inputTokens, outputTokens);
 
-    console.log(`[Gemini Analysis] Cost: ₹${costINR.toFixed(4)} (${inputTokens} in + ${outputTokens} out tokens)`);
+    console.log(`[Gemini Analysis] Cost: $${costUSD.toFixed(6)} (${inputTokens} in + ${outputTokens} out tokens)`);
 
     // Deduct cost from user's budget (not shown in session)
     if (userId) {
-      await deductAnalysisCost(userId, costINR);
+      await deductAnalysisCost(userId, costUSD);
     }
 
     // Parse the JSON response

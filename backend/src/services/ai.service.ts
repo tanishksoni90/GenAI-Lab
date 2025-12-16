@@ -197,7 +197,7 @@ const callOpenAI = async (
   prompt: string,
   conversationHistory: Array<{ role: string; content: string }>,
   category: string
-): Promise<{ content: string; tokensUsed: number }> => {
+): Promise<{ content: string; tokensUsed: number; inputTokens: number; outputTokens: number }> => {
   const client = await getOpenAIClient();
   if (!client) {
     throw new BadRequestError('OpenAI API key not configured. Please add it in Admin Dashboard → API Keys.');
@@ -217,6 +217,8 @@ const callOpenAI = async (
     return {
       content: `![Generated Image](${imageUrl})\n\n*Image generated using ${modelId}*`,
       tokensUsed: 1000, // DALL-E has fixed per-image cost
+      inputTokens: 0,
+      outputTokens: 1000,
     };
   }
 
@@ -232,14 +234,17 @@ const callOpenAI = async (
   const response = await client.chat.completions.create({
     model: modelId,
     messages,
-    max_tokens: 2048,
+    max_tokens: DEFAULT_MAX_OUTPUT_TOKENS,
   });
 
   const content = response.choices[0]?.message?.content || '';
-  const tokensUsed = response.usage?.total_tokens || 
-    Math.ceil(prompt.length / 4) + Math.ceil(content.length / 4);
+  
+  // Get actual token counts from API response
+  const inputTokens = response.usage?.prompt_tokens || Math.ceil(prompt.length / 4);
+  const outputTokens = response.usage?.completion_tokens || Math.ceil(content.length / 4);
+  const tokensUsed = response.usage?.total_tokens || (inputTokens + outputTokens);
 
-  return { content, tokensUsed };
+  return { content, tokensUsed, inputTokens, outputTokens };
 };
 
 // Anthropic API call (Claude models)
@@ -247,7 +252,7 @@ const callAnthropic = async (
   modelId: string,
   prompt: string,
   conversationHistory: Array<{ role: string; content: string }>
-): Promise<{ content: string; tokensUsed: number }> => {
+): Promise<{ content: string; tokensUsed: number; inputTokens: number; outputTokens: number }> => {
   const client = await getAnthropicClient();
   if (!client) {
     throw new BadRequestError('Anthropic API key not configured. Please add it in Admin Dashboard → API Keys.');
@@ -264,7 +269,7 @@ const callAnthropic = async (
 
   const response = await client.messages.create({
     model: modelId,
-    max_tokens: 2048,
+    max_tokens: DEFAULT_MAX_OUTPUT_TOKENS,
     messages,
   });
 
@@ -272,23 +277,35 @@ const callAnthropic = async (
     ? response.content[0].text 
     : '';
   
-  const tokensUsed = (response.usage?.input_tokens || 0) + (response.usage?.output_tokens || 0);
+  // Get actual token counts from API response
+  const inputTokens = response.usage?.input_tokens || Math.ceil(prompt.length / 4);
+  const outputTokens = response.usage?.output_tokens || Math.ceil(content.length / 4);
+  const tokensUsed = inputTokens + outputTokens;
 
-  return { content, tokensUsed };
+  return { content, tokensUsed, inputTokens, outputTokens };
 };
+
+// Default max output tokens for responses (can be made configurable later)
+const DEFAULT_MAX_OUTPUT_TOKENS = 1024;
 
 // Google AI API call (Gemini models)
 const callGoogle = async (
   modelId: string,
   prompt: string,
   conversationHistory: Array<{ role: string; content: string }>
-): Promise<{ content: string; tokensUsed: number }> => {
+): Promise<{ content: string; tokensUsed: number; inputTokens: number; outputTokens: number }> => {
   const client = await getGoogleClient();
   if (!client) {
     throw new BadRequestError('Google AI API key not configured. Please add it in Admin Dashboard → API Keys.');
   }
 
-  const model = client.getGenerativeModel({ model: modelId });
+  // Configure model with generation settings including max output tokens
+  const model = client.getGenerativeModel({ 
+    model: modelId,
+    generationConfig: {
+      maxOutputTokens: DEFAULT_MAX_OUTPUT_TOKENS,
+    },
+  });
 
   // Build conversation history for Gemini
   const history = conversationHistory.map(msg => ({
@@ -305,10 +322,42 @@ const callGoogle = async (
   const response = await result.response;
   const content = response.text();
 
-  // Estimate tokens (Gemini doesn't always return usage)
-  const tokensUsed = Math.ceil(prompt.length / 4) + Math.ceil(content.length / 4);
+  // Get actual token counts from API response (usageMetadata)
+  // IMPORTANT: Gemini's promptTokenCount is CUMULATIVE (includes all history)
+  // We need to calculate the INCREMENTAL tokens for just this exchange
+  const usageMetadata = response.usageMetadata;
+  
+  // Calculate history tokens to subtract from cumulative promptTokenCount
+  // Each message in history contributes to the prompt token count
+  const historyText = conversationHistory.map(m => m.content).join('');
+  const estimatedHistoryTokens = Math.ceil(historyText.length / 4);
+  
+  // The cumulative prompt token count from Gemini
+  const cumulativePromptTokens = usageMetadata?.promptTokenCount || 0;
+  
+  // Calculate incremental input tokens (just for this prompt, not including history)
+  // If we have history, subtract estimated history tokens; otherwise use the prompt tokens directly
+  let inputTokens: number;
+  if (conversationHistory.length > 0 && cumulativePromptTokens > 0) {
+    // Subtract history tokens to get just the new prompt's tokens
+    inputTokens = Math.max(Math.ceil(prompt.length / 4), cumulativePromptTokens - estimatedHistoryTokens);
+    // Sanity check: input tokens should be roughly proportional to prompt length
+    const promptEstimate = Math.ceil(prompt.length / 4);
+    if (inputTokens > promptEstimate * 3) {
+      // If calculated value seems too high, use estimate
+      inputTokens = promptEstimate;
+    }
+  } else {
+    inputTokens = cumulativePromptTokens || Math.ceil(prompt.length / 4);
+  }
+  
+  // Output tokens are NOT cumulative, they're just for this response
+  const outputTokens = usageMetadata?.candidatesTokenCount || Math.ceil(content.length / 4);
+  
+  // Total tokens used for THIS exchange only (not cumulative)
+  const tokensUsed = inputTokens + outputTokens;
 
-  return { content, tokensUsed };
+  return { content, tokensUsed, inputTokens, outputTokens };
 };
 
 // ElevenLabs API call (Text-to-Speech)
@@ -359,6 +408,320 @@ const callElevenLabs = async (
   };
 };
 
+// ==================== STREAMING API IMPLEMENTATIONS ====================
+
+// Streaming callback type
+export type StreamCallback = (chunk: string, done: boolean) => void;
+
+// OpenAI Streaming
+const streamOpenAI = async (
+  modelId: string,
+  prompt: string,
+  conversationHistory: Array<{ role: string; content: string }>,
+  onChunk: StreamCallback
+): Promise<{ tokensUsed: number; inputTokens: number; outputTokens: number }> => {
+  const client = await getOpenAIClient();
+  if (!client) {
+    throw new BadRequestError('OpenAI API key not configured. Please add it in Admin Dashboard → API Keys.');
+  }
+
+  const messages: OpenAI.Chat.ChatCompletionMessageParam[] = [
+    ...conversationHistory.map(msg => ({
+      role: msg.role as 'user' | 'assistant' | 'system',
+      content: msg.content,
+    })),
+    { role: 'user' as const, content: prompt },
+  ];
+
+  const stream = await client.chat.completions.create({
+    model: modelId,
+    messages,
+    max_tokens: DEFAULT_MAX_OUTPUT_TOKENS,
+    stream: true,
+    stream_options: { include_usage: true }, // Request usage in final chunk
+  });
+
+  let fullContent = '';
+  let inputTokens = 0;
+  let outputTokens = 0;
+  let tokensUsed = 0;
+
+  for await (const chunk of stream) {
+    const content = chunk.choices[0]?.delta?.content || '';
+    if (content) {
+      fullContent += content;
+      onChunk(content, false);
+    }
+    
+    // Get usage from final chunk (with stream_options: { include_usage: true })
+    if (chunk.usage) {
+      inputTokens = chunk.usage.prompt_tokens || 0;
+      outputTokens = chunk.usage.completion_tokens || 0;
+      tokensUsed = chunk.usage.total_tokens || 0;
+    }
+  }
+
+  onChunk('', true); // Signal completion
+
+  // Fallback to estimation if not provided
+  if (tokensUsed === 0) {
+    inputTokens = Math.ceil(prompt.length / 4);
+    outputTokens = Math.ceil(fullContent.length / 4);
+    tokensUsed = inputTokens + outputTokens;
+  }
+
+  return { tokensUsed, inputTokens, outputTokens };
+};
+
+// Anthropic Streaming
+const streamAnthropic = async (
+  modelId: string,
+  prompt: string,
+  conversationHistory: Array<{ role: string; content: string }>,
+  onChunk: StreamCallback
+): Promise<{ tokensUsed: number; inputTokens: number; outputTokens: number }> => {
+  const client = await getAnthropicClient();
+  if (!client) {
+    throw new BadRequestError('Anthropic API key not configured. Please add it in Admin Dashboard → API Keys.');
+  }
+
+  const messages: Anthropic.MessageParam[] = [
+    ...conversationHistory.map(msg => ({
+      role: msg.role as 'user' | 'assistant',
+      content: msg.content,
+    })),
+    { role: 'user' as const, content: prompt },
+  ];
+
+  const stream = await client.messages.stream({
+    model: modelId,
+    max_tokens: DEFAULT_MAX_OUTPUT_TOKENS,
+    messages,
+  });
+
+  let inputTokens = 0;
+  let outputTokens = 0;
+
+  for await (const event of stream) {
+    if (event.type === 'content_block_delta' && event.delta.type === 'text_delta') {
+      onChunk(event.delta.text, false);
+    }
+    // Capture input tokens from message_start event
+    if (event.type === 'message_start' && event.message?.usage) {
+      inputTokens = event.message.usage.input_tokens || 0;
+    }
+    // Capture output tokens from message_delta event
+    if (event.type === 'message_delta' && event.usage) {
+      outputTokens = event.usage.output_tokens || 0;
+    }
+  }
+
+  // Get final message for complete token counts
+  const finalMessage = await stream.finalMessage();
+  inputTokens = finalMessage.usage?.input_tokens || inputTokens;
+  outputTokens = finalMessage.usage?.output_tokens || outputTokens;
+  const tokensUsed = inputTokens + outputTokens;
+
+  onChunk('', true); // Signal completion
+
+  return { tokensUsed, inputTokens, outputTokens };
+};
+
+// Google Streaming
+const streamGoogle = async (
+  modelId: string,
+  prompt: string,
+  conversationHistory: Array<{ role: string; content: string }>,
+  onChunk: StreamCallback
+): Promise<{ tokensUsed: number; inputTokens: number; outputTokens: number }> => {
+  const client = await getGoogleClient();
+  if (!client) {
+    throw new BadRequestError('Google AI API key not configured. Please add it in Admin Dashboard → API Keys.');
+  }
+
+  // Configure model with generation settings including max output tokens
+  const model = client.getGenerativeModel({ 
+    model: modelId,
+    generationConfig: {
+      maxOutputTokens: DEFAULT_MAX_OUTPUT_TOKENS,
+    },
+  });
+
+  const history = conversationHistory.map(msg => ({
+    role: msg.role === 'assistant' ? 'model' : 'user',
+    parts: [{ text: msg.content }],
+  }));
+
+  const chat = model.startChat({
+    history: history as any,
+  });
+
+  const result = await chat.sendMessageStream(prompt);
+  
+  let fullContent = '';
+
+  for await (const chunk of result.stream) {
+    const text = chunk.text();
+    if (text) {
+      fullContent += text;
+      onChunk(text, false);
+    }
+  }
+
+  onChunk('', true); // Signal completion
+
+  // Get actual token counts from final response
+  // IMPORTANT: Gemini's promptTokenCount is CUMULATIVE (includes all history)
+  // We need to calculate the INCREMENTAL tokens for just this exchange
+  const response = await result.response;
+  const usageMetadata = response.usageMetadata;
+  
+  // Calculate history tokens to subtract from cumulative promptTokenCount
+  const historyText = conversationHistory.map(m => m.content).join('');
+  const estimatedHistoryTokens = Math.ceil(historyText.length / 4);
+  
+  // The cumulative prompt token count from Gemini
+  const cumulativePromptTokens = usageMetadata?.promptTokenCount || 0;
+  
+  // Calculate incremental input tokens (just for this prompt, not including history)
+  let inputTokens: number;
+  if (conversationHistory.length > 0 && cumulativePromptTokens > 0) {
+    inputTokens = Math.max(Math.ceil(prompt.length / 4), cumulativePromptTokens - estimatedHistoryTokens);
+    const promptEstimate = Math.ceil(prompt.length / 4);
+    if (inputTokens > promptEstimate * 3) {
+      inputTokens = promptEstimate;
+    }
+  } else {
+    inputTokens = cumulativePromptTokens || Math.ceil(prompt.length / 4);
+  }
+  
+  // Output tokens are NOT cumulative, they're just for this response
+  const outputTokens = usageMetadata?.candidatesTokenCount || Math.ceil(fullContent.length / 4);
+  
+  // Total tokens used for THIS exchange only (not cumulative)
+  const tokensUsed = inputTokens + outputTokens;
+
+  return { tokensUsed, inputTokens, outputTokens };
+};
+
+// Stream with AI model
+export const streamWithModel = async (
+  modelId: string,
+  prompt: string,
+  conversationHistory: Array<{ role: string; content: string }>,
+  onChunk: StreamCallback
+): Promise<{
+  model: { id: string; name: string; provider: string; category: string };
+  tokensUsed: number;
+  inputTokens: number;
+  outputTokens: number;
+  isMock: boolean;
+}> => {
+  const model = await getModelById(modelId);
+
+  // Check if real API key is available
+  const useMock = !(await hasRealApiKey(model.provider));
+
+  if (useMock) {
+    // Simulate streaming for mock responses
+    const mockResult = generateMockResponse(prompt, model.name, model.category);
+    const words = mockResult.content.split(' ');
+    
+    for (let i = 0; i < words.length; i++) {
+      const word = words[i] + (i < words.length - 1 ? ' ' : '');
+      onChunk(word, false);
+      // Small delay to simulate typing
+      await new Promise(resolve => setTimeout(resolve, 30));
+    }
+    
+    onChunk('', true);
+
+    // Estimate tokens for mock (no real API to get actual counts)
+    const inputTokens = Math.ceil(prompt.length / 4);
+    const outputTokens = Math.ceil(mockResult.content.length / 4);
+
+    return {
+      model: {
+        id: model.id,
+        name: model.name,
+        provider: model.provider,
+        category: model.category,
+      },
+      tokensUsed: mockResult.tokensUsed,
+      inputTokens,
+      outputTokens,
+      isMock: true,
+    };
+  }
+
+  // Stream from real API
+  try {
+    let result: { tokensUsed: number; inputTokens: number; outputTokens: number };
+
+    switch (model.provider) {
+      case 'openai':
+        result = await streamOpenAI(model.modelId, prompt, conversationHistory, onChunk);
+        break;
+      
+      case 'anthropic':
+        result = await streamAnthropic(model.modelId, prompt, conversationHistory, onChunk);
+        break;
+      
+      case 'google':
+        result = await streamGoogle(model.modelId, prompt, conversationHistory, onChunk);
+        break;
+      
+      default:
+        // Fallback to non-streaming for unsupported providers
+        const nonStreamResult = await chatWithModel(modelId, prompt, conversationHistory);
+        onChunk(nonStreamResult.response, true);
+        return {
+          model: {
+            id: model.id,
+            name: model.name,
+            provider: model.provider,
+            category: model.category,
+          },
+          tokensUsed: nonStreamResult.tokensUsed,
+          inputTokens: nonStreamResult.inputTokens,
+          outputTokens: nonStreamResult.outputTokens,
+          isMock: nonStreamResult.isMock,
+        };
+    }
+
+    return {
+      model: {
+        id: model.id,
+        name: model.name,
+        provider: model.provider,
+        category: model.category,
+      },
+      tokensUsed: result.tokensUsed,
+      inputTokens: result.inputTokens,
+      outputTokens: result.outputTokens,
+      isMock: false,
+    };
+  } catch (error: any) {
+    console.error(`[AI Service] Streaming error for ${model.provider}:`, error.message);
+    
+    // Send error message as stream
+    onChunk(`⚠️ **API Error**: ${error.message}`, true);
+
+    return {
+      model: {
+        id: model.id,
+        name: model.name,
+        provider: model.provider,
+        category: model.category,
+      },
+      tokensUsed: 0,
+      inputTokens: 0,
+      outputTokens: 0,
+      isMock: true,
+    };
+  }
+};
+
 // Chat with AI model (mock or real)
 export const chatWithModel = async (
   modelId: string,
@@ -372,6 +735,8 @@ export const chatWithModel = async (
 
   if (useMock) {
     const mockResult = generateMockResponse(prompt, model.name, model.category);
+    const inputTokens = Math.ceil(prompt.length / 4);
+    const outputTokens = Math.ceil(mockResult.content.length / 4);
     
     return {
       model: {
@@ -382,13 +747,15 @@ export const chatWithModel = async (
       },
       response: mockResult.content,
       tokensUsed: mockResult.tokensUsed,
+      inputTokens,
+      outputTokens,
       isMock: true,
     };
   }
 
   // Call real API based on provider
   try {
-    let result: { content: string; tokensUsed: number };
+    let result: { content: string; tokensUsed: number; inputTokens: number; outputTokens: number };
 
     switch (model.provider) {
       case 'openai':
@@ -404,7 +771,8 @@ export const chatWithModel = async (
         break;
       
       case 'elevenlabs':
-        result = await callElevenLabs(model.modelId, prompt);
+        const elevenResult = await callElevenLabs(model.modelId, prompt);
+        result = { ...elevenResult, inputTokens: 0, outputTokens: elevenResult.tokensUsed };
         break;
       
       default:
@@ -420,6 +788,8 @@ export const chatWithModel = async (
       },
       response: result.content,
       tokensUsed: result.tokensUsed,
+      inputTokens: result.inputTokens,
+      outputTokens: result.outputTokens,
       isMock: false,
     };
   } catch (error: any) {
@@ -428,6 +798,8 @@ export const chatWithModel = async (
     
     // If API call fails, fall back to mock with error notice
     const mockResult = generateMockResponse(prompt, model.name, model.category);
+    const inputTokens = Math.ceil(prompt.length / 4);
+    const outputTokens = Math.ceil(mockResult.content.length / 4);
     
     return {
       model: {
@@ -438,6 +810,8 @@ export const chatWithModel = async (
       },
       response: `⚠️ **API Error**: ${error.message}\n\n---\n\n**Fallback Mock Response:**\n${mockResult.content}`,
       tokensUsed: mockResult.tokensUsed,
+      inputTokens,
+      outputTokens,
       isMock: true,
       error: error.message,
     };

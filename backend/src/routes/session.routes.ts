@@ -39,6 +39,7 @@ router.post('/:id/end', sessionController.endSession);
 // Messages
 router.get('/:id/messages', sessionController.getSessionMessages);
 router.post('/:id/messages', validate(sendMessageSchema), sessionController.sendMessage);
+router.post('/:id/messages/stream', validate(sendMessageSchema), sessionController.sendMessageStreaming);
 
 export default router;
 
