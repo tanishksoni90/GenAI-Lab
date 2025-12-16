@@ -3,6 +3,7 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
 import SkyToggle from "@/components/ui/sky-toggle";
+import { MarkdownRenderer } from "@/components/ui/markdown-renderer";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { useTheme } from "@/contexts/ThemeContext";
 import { 
@@ -593,21 +594,13 @@ const AgentChat = () => {
                         : "glass-card border border-pink-500/30 bg-pink-500/5"
                       : "glass-card"
                   }`}>
-                    <div className="text-sm leading-relaxed whitespace-pre-wrap">
-                      {message.content.split('\n').map((line, i) => {
-                        if (line.includes('**')) {
-                          const parts = line.split(/\*\*(.*?)\*\*/);
-                          return (
-                            <p key={i} className="my-1">
-                              {parts.map((part, j) => 
-                                j % 2 === 1 ? <strong key={j} className="text-primary">{part}</strong> : part
-                              )}
-                            </p>
-                          );
-                        }
-                        return line ? <p key={i} className="my-1">{line}</p> : <br key={i} />;
-                      })}
-                    </div>
+                    {message.role === "assistant" ? (
+                      <MarkdownRenderer content={message.content} />
+                    ) : (
+                      <div className="text-sm leading-relaxed whitespace-pre-wrap text-foreground">
+                        {message.content}
+                      </div>
+                    )}
                   </div>
 
                   <div className={`flex items-center gap-1 mt-2 opacity-0 group-hover:opacity-100 transition-opacity ${

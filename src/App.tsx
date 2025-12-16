@@ -12,6 +12,7 @@ import AdminDashboard from "./pages/admin/Dashboard";
 import StudentSignIn from "./pages/student/SignIn";
 import StudentSignUp from "./pages/student/SignUp";
 import SetNewPassword from "./pages/student/SetNewPassword";
+import Compare from "./pages/student/Compare";
 import StudentDashboard from "./pages/student/Dashboard";
 import StudentChat from "./pages/student/Chat";
 import AgentChat from "./pages/student/AgentChat";
@@ -45,6 +46,7 @@ const App = () => (
               <Route path="/student/dashboard" element={<StudentDashboard />} />
               <Route path="/student/chat/:modelId" element={<StudentChat />} />
               <Route path="/student/agent-chat/:agentId" element={<AgentChat />} />
+              <Route path="/student/compare" element={<Compare />} />
               {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
               <Route path="*" element={<NotFound />} />
             </Routes>

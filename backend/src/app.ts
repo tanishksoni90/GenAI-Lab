@@ -13,6 +13,7 @@ import sessionRoutes from './routes/session.routes';
 import agentRoutes from './routes/agent.routes';
 import artifactRoutes from './routes/artifact.routes';
 import adminRoutes from './routes/admin.routes';
+import comparisonRoutes from './routes/comparison.routes';
 
 // Create Express app
 const app = express();
@@ -59,6 +60,7 @@ app.use('/api/sessions', sessionRoutes);
 app.use('/api/agents', agentRoutes);
 app.use('/api/artifacts', artifactRoutes);
 app.use('/api/admin', adminRoutes);
+app.use('/api/comparison', comparisonRoutes);
 
 // 404 handler
 app.use(notFoundHandler);

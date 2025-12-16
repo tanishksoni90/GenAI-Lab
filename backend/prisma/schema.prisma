@@ -30,12 +30,13 @@ model User {
   batch         Batch?    @relation(fields: [batchId], references: [id])
   
   // Budget & Token management
-  // budgetLimit: Actual INR budget limit (default ₹1,500)
-  // budgetUsed: Actual INR spent on API calls
+  // All monetary values stored in USD (universal standard)
+  // budgetLimit: USD budget limit (default $18 ≈ ₹1,500 @ 84 INR/USD)
+  // budgetUsed: USD spent on API calls
   // tokenQuota: Virtual tokens for display (default 50,000)
   // tokenUsed: Virtual tokens used (calculated from budgetUsed)
-  budgetLimit   Float     @default(1500)  // INR budget limit
-  budgetUsed    Float     @default(0)     // INR spent
+  budgetLimit   Float     @default(18)    // USD budget limit
+  budgetUsed    Float     @default(0)     // USD spent
   tokenQuota    Int       @default(50000) // Virtual display tokens
   tokenUsed     Int       @default(0)     // Virtual tokens used
   
@@ -51,6 +52,7 @@ model User {
   agents        Agent[]
   artifacts     Artifact[]
   activityLogs  ActivityLog[]
+  comparisonSessions ComparisonSession[]
   
   @@index([email])
   @@index([registrationId])
@@ -102,17 +104,20 @@ model AIModel {
   category    String   // text | image | audio | multimodal | code
   description String?
   
-  // Pricing in INR (for actual cost tracking)
-  // For text/code models: cost per 1K tokens in INR
-  // For image models: cost per image in INR
-  // For audio models: cost per 1K characters in INR
-  inputCostINR   Float    @default(0)  // INR per 1K input tokens
-  outputCostINR  Float    @default(0)  // INR per 1K output tokens
-  requestCostINR Float    @default(0)  // INR per request (for image/audio)
+  // Pricing in USD (universal standard - as quoted by providers)
+  // Primary pricing is in config/pricing.ts (per 1M tokens)
+  // These DB fields are fallback/legacy (per 1K tokens)
+  //
+  // For text/code models: USD per 1K tokens
+  // For image models: USD per image (in inputCost)
+  // For audio models: USD per 1K characters (in inputCost)
+  inputCost   Float    @default(0)  // USD per 1K input tokens
+  outputCost  Float    @default(0)  // USD per 1K output tokens
   
-  // Legacy fields (keep for backward compatibility, but use INR fields)
-  inputCost   Float    @default(0)  // per 1K tokens (deprecated)
-  outputCost  Float    @default(0)  // per 1K tokens (deprecated)
+  // Legacy INR fields (deprecated - keeping for backward compatibility)
+  inputCostINR   Float    @default(0)  // Deprecated
+  outputCostINR  Float    @default(0)  // Deprecated
+  requestCostINR Float    @default(0)  // Deprecated
   
   // Configuration
   maxTokens   Int      @default(4096)
@@ -165,8 +170,13 @@ model Session {
   avgScore    Float     @default(0)
   promptCount Int       @default(0)
   
-  // Token usage
-  tokensUsed  Int       @default(0)
+  // Token usage (tracked separately for accurate costing)
+  inputTokens  Int      @default(0)  // Total input tokens (prompts sent to model)
+  outputTokens Int      @default(0)  // Total output tokens (model responses)
+  tokensUsed   Int      @default(0)  // Total tokens (input + output) - for backward compat
+  
+  // Cost tracking in USD
+  totalCost    Float    @default(0)  // Total USD cost for this session
   
   // Status
   isActive    Boolean   @default(true)
@@ -194,8 +204,15 @@ model Message {
   score       Float?
   feedback    String?  // JSON string with detailed feedback
   
-  // Token count
-  tokens      Int      @default(0)
+  // Token tracking (explicit for accurate costing)
+  // For user messages: inputTokens = tokens sent to model
+  // For assistant messages: outputTokens = tokens in response
+  inputTokens  Int     @default(0)  // Input tokens (for user messages)
+  outputTokens Int     @default(0)  // Output tokens (for assistant messages)
+  tokens       Int     @default(0)  // Legacy field for backward compat
+  
+  // Cost in USD for this message
+  cost         Float   @default(0)
   
   createdAt   DateTime @default(now())
   
@@ -315,6 +332,78 @@ model ActivityLog {
   
   @@index([userId])
   @@index([createdAt])
+}
+
+// ==================== MULTI-MODEL COMPARISON ====================
+
+model ComparisonSession {
+  id          String   @id @default(uuid())
+  userId      String
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  category    String   // text | image | audio | video
+  title       String?  // Auto-generated or user-defined
+  
+  // Token tracking (aggregated from all responses)
+  totalInputTokens  Int   @default(0)  // Sum of all input tokens across models
+  totalOutputTokens Int   @default(0)  // Sum of all output tokens across models
+  totalTokensUsed   Int   @default(0)  // Total (legacy field)
+  
+  // Cost tracking in USD (sum of all model responses)
+  totalCost         Float @default(0)
+  
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  
+  // Relations
+  exchanges   ComparisonExchange[]
+  
+  @@index([userId])
+  @@index([category])
+}
+
+model ComparisonExchange {
+  id                  String   @id @default(uuid())
+  comparisonSessionId String
+  comparisonSession   ComparisonSession @relation(fields: [comparisonSessionId], references: [id], onDelete: Cascade)
+  
+  prompt              String   // The shared prompt
+  
+  createdAt           DateTime @default(now())
+  
+  // Relations
+  responses           ComparisonResponse[]
+  
+  @@index([comparisonSessionId])
+}
+
+model ComparisonResponse {
+  id                    String   @id @default(uuid())
+  comparisonExchangeId  String
+  comparisonExchange    ComparisonExchange @relation(fields: [comparisonExchangeId], references: [id], onDelete: Cascade)
+  
+  modelId               String
+  modelName             String   // Denormalized for quick access
+  provider              String
+  
+  response              String
+  
+  // Token tracking (explicit for accurate costing)
+  inputTokens           Int      @default(0)  // Tokens in the prompt sent to this model
+  outputTokens          Int      @default(0)  // Tokens in this model's response
+  tokensUsed            Int      @default(0)  // Total (legacy field)
+  
+  // Cost in USD for this response
+  cost                  Float    @default(0)
+  
+  responseTimeMs        Int      @default(0) // Response time in milliseconds
+  score                 Float?   // Optional prompt score
+  isMock                Boolean  @default(false)
+  error                 String?  // Error message if any
+  
+  createdAt             DateTime @default(now())
+  
+  @@index([comparisonExchangeId])
+  @@index([modelId])
 }
 
 // ==================== SETTINGS ====================

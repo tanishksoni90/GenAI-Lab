@@ -3,138 +3,218 @@ import bcrypt from 'bcryptjs';
 
 const prisma = new PrismaClient();
 
+// ==================== PRICING REFERENCE ====================
+// All prices in USD per 1M tokens (industry standard)
+// Sources: Official pricing pages of each provider
+// Last updated: December 2024
+// 
+// Note: inputCost and outputCost in the database are LEGACY fields (per 1K tokens)
+// The pricing config (backend/src/config/pricing.ts) has the authoritative per 1M prices
+// These DB values are used as fallback only
+
 async function main() {
   console.log('🌱 Starting database seed...\n');
 
   // Create AI Models
+  // Note: inputCost/outputCost are USD per 1K tokens (legacy) - actual pricing is in config/pricing.ts
   console.log('Creating AI Models...');
   const models = await Promise.all([
-    // OpenAI Models
+    // ==================== OpenAI Models ====================
+    // Source: https://openai.com/pricing
     prisma.aIModel.upsert({
       where: { provider_modelId: { provider: 'openai', modelId: 'gpt-4o' } },
-      update: {},
+      update: {
+        description: "GPT-4o (\"o\" for \"omni\") is OpenAI's most advanced multimodal model. It accepts text and image inputs and produces text outputs. GPT-4o is faster, cheaper, and offers higher rate limits compared to GPT-4 Turbo.",
+        maxTokens: 128000,
+        // USD per 1K tokens (per 1M: input=$2.50, output=$10.00)
+        inputCost: 0.0025,
+        outputCost: 0.01,
+      },
       create: {
         name: 'GPT-4o',
         provider: 'openai',
         modelId: 'gpt-4o',
         category: 'text',
-        description: 'Most capable GPT-4 model with vision capabilities',
-        inputCost: 0.005,
-        outputCost: 0.015,
+        description: "GPT-4o (\"o\" for \"omni\") is OpenAI's most advanced multimodal model. It accepts text and image inputs and produces text outputs. GPT-4o is faster, cheaper, and offers higher rate limits compared to GPT-4 Turbo.",
+        inputCost: 0.0025,  // $2.50/1M = $0.0025/1K
+        outputCost: 0.01,   // $10.00/1M = $0.01/1K
         maxTokens: 128000,
       },
     }),
     prisma.aIModel.upsert({
       where: { provider_modelId: { provider: 'openai', modelId: 'gpt-4o-mini' } },
-      update: {},
+      update: {
+        description: "GPT-4o mini is OpenAI's affordable small model for lightweight tasks. It is multimodal, accepting text or image inputs and outputting text. Ideal for fine-tuning and multi-step workflows.",
+        maxTokens: 128000,
+        inputCost: 0.00015,  // $0.15/1M
+        outputCost: 0.0006,  // $0.60/1M
+      },
       create: {
         name: 'GPT-4o Mini',
         provider: 'openai',
         modelId: 'gpt-4o-mini',
         category: 'text',
-        description: 'Affordable and intelligent small model for fast tasks',
-        inputCost: 0.00015,
-        outputCost: 0.0006,
+        description: "GPT-4o mini is OpenAI's affordable small model for lightweight tasks. It is multimodal, accepting text or image inputs and outputting text. Ideal for fine-tuning and multi-step workflows.",
+        inputCost: 0.00015,  // $0.15/1M = $0.00015/1K
+        outputCost: 0.0006,  // $0.60/1M = $0.0006/1K
         maxTokens: 128000,
       },
     }),
     prisma.aIModel.upsert({
       where: { provider_modelId: { provider: 'openai', modelId: 'gpt-3.5-turbo' } },
-      update: {},
+      update: {
+        description: "GPT-3.5 Turbo is optimized for dialogue. It supports a 16K token context and excels at understanding and generating natural language or code.",
+        maxTokens: 16385,
+        inputCost: 0.0005,   // $0.50/1M
+        outputCost: 0.0015,  // $1.50/1M
+      },
       create: {
         name: 'GPT-3.5 Turbo',
         provider: 'openai',
         modelId: 'gpt-3.5-turbo',
         category: 'text',
-        description: 'Fast and efficient for simple tasks',
-        inputCost: 0.0005,
-        outputCost: 0.0015,
+        description: "GPT-3.5 Turbo is optimized for dialogue. It supports a 16K token context and excels at understanding and generating natural language or code.",
+        inputCost: 0.0005,   // $0.50/1M = $0.0005/1K
+        outputCost: 0.0015,  // $1.50/1M = $0.0015/1K
         maxTokens: 16385,
       },
     }),
     prisma.aIModel.upsert({
       where: { provider_modelId: { provider: 'openai', modelId: 'dall-e-3' } },
-      update: {},
+      update: {
+        description: 'Most advanced image generation model from OpenAI. $0.04 per image (1024x1024).',
+        inputCost: 0.04,  // Per image cost (not per token)
+        outputCost: 0,
+      },
       create: {
         name: 'DALL-E 3',
         provider: 'openai',
         modelId: 'dall-e-3',
         category: 'image',
-        description: 'Most advanced image generation model',
-        inputCost: 0.04,
+        description: 'Most advanced image generation model from OpenAI. $0.04 per image (1024x1024).',
+        inputCost: 0.04,  // Per image cost
         outputCost: 0,
         maxTokens: 0,
       },
     }),
-    // Google Models
+    
+    // ==================== Google Models ====================
+    // Source: https://ai.google.dev/pricing
     prisma.aIModel.upsert({
       where: { provider_modelId: { provider: 'google', modelId: 'gemini-2.0-flash' } },
-      update: {},
+      update: {
+        description: "Gemini 2.0 Flash is Google DeepMind's fast, high-performing multimodal model. Delivers low-latency responses and native tool usage. Ideal for real-time agentic applications.",
+        maxTokens: 1000000,
+        inputCost: 0.0001,   // $0.10/1M
+        outputCost: 0.0004,  // $0.40/1M
+      },
       create: {
         name: 'Gemini 2.0 Flash',
         provider: 'google',
         modelId: 'gemini-2.0-flash',
         category: 'text',
-        description: 'Fast and versatile multimodal model',
-        inputCost: 0.00035,
-        outputCost: 0.0014,
+        description: "Gemini 2.0 Flash is Google DeepMind's fast, high-performing multimodal model. Delivers low-latency responses and native tool usage. Ideal for real-time agentic applications.",
+        inputCost: 0.0001,   // $0.10/1M = $0.0001/1K
+        outputCost: 0.0004,  // $0.40/1M = $0.0004/1K
         maxTokens: 1000000,
       },
     }),
     prisma.aIModel.upsert({
-      where: { provider_modelId: { provider: 'google', modelId: 'gemini-2.5-flash-lite' } },
-      update: {},
+      where: { provider_modelId: { provider: 'google', modelId: 'gemini-2.5-flash-preview-05-20' } },
+      update: {
+        description: "Gemini 2.5 Flash Preview - latest experimental model with enhanced reasoning capabilities. 1M token context window.",
+        maxTokens: 1048576,
+        inputCost: 0.00015,  // $0.15/1M
+        outputCost: 0.0006,  // $0.60/1M
+      },
       create: {
-        name: 'Gemini 2.5 Flash Lite',
+        name: 'Gemini 2.5 Flash Preview',
         provider: 'google',
-        modelId: 'gemini-2.5-flash-lite',
+        modelId: 'gemini-2.5-flash-preview-05-20',
         category: 'text',
-        description: 'Lightweight model for quick responses',
-        inputCost: 0.00015,
-        outputCost: 0.0006,
-        maxTokens: 500000,
+        description: "Gemini 2.5 Flash Preview - latest experimental model with enhanced reasoning capabilities. 1M token context window.",
+        inputCost: 0.00015,  // $0.15/1M = $0.00015/1K
+        outputCost: 0.0006,  // $0.60/1M = $0.0006/1K
+        maxTokens: 1048576,
       },
     }),
-    // Anthropic Models
     prisma.aIModel.upsert({
-      where: { provider_modelId: { provider: 'anthropic', modelId: 'claude-sonnet-4.5' } },
-      update: {},
+      where: { provider_modelId: { provider: 'google', modelId: 'gemini-1.5-flash' } },
+      update: {
+        description: "Gemini 1.5 Flash - fast and versatile multimodal model for diverse tasks. 1M token context window.",
+        maxTokens: 1000000,
+        inputCost: 0.000075, // $0.075/1M
+        outputCost: 0.0003,  // $0.30/1M
+      },
       create: {
-        name: 'Claude Sonnet 4.5',
-        provider: 'anthropic',
-        modelId: 'claude-sonnet-4.5',
+        name: 'Gemini 1.5 Flash',
+        provider: 'google',
+        modelId: 'gemini-1.5-flash',
         category: 'text',
-        description: 'Balanced performance and speed',
-        inputCost: 0.003,
-        outputCost: 0.015,
+        description: "Gemini 1.5 Flash - fast and versatile multimodal model for diverse tasks. 1M token context window.",
+        inputCost: 0.000075, // $0.075/1M = $0.000075/1K
+        outputCost: 0.0003,  // $0.30/1M = $0.0003/1K
+        maxTokens: 1000000,
+      },
+    }),
+    
+    // ==================== Anthropic Models ====================
+    // Source: https://www.anthropic.com/pricing
+    prisma.aIModel.upsert({
+      where: { provider_modelId: { provider: 'anthropic', modelId: 'claude-sonnet-4-20250514' } },
+      update: {
+        description: "Claude Sonnet 4 - Anthropic's balanced model with 200K context. Excellent for coding, analysis, and complex reasoning tasks.",
+        maxTokens: 200000,
+        inputCost: 0.003,   // $3.00/1M
+        outputCost: 0.015,  // $15.00/1M
+      },
+      create: {
+        name: 'Claude Sonnet 4',
+        provider: 'anthropic',
+        modelId: 'claude-sonnet-4-20250514',
+        category: 'text',
+        description: "Claude Sonnet 4 - Anthropic's balanced model with 200K context. Excellent for coding, analysis, and complex reasoning tasks.",
+        inputCost: 0.003,   // $3.00/1M = $0.003/1K
+        outputCost: 0.015,  // $15.00/1M = $0.015/1K
         maxTokens: 200000,
       },
     }),
     prisma.aIModel.upsert({
-      where: { provider_modelId: { provider: 'anthropic', modelId: 'claude-haiku-4.5' } },
-      update: {},
+      where: { provider_modelId: { provider: 'anthropic', modelId: 'claude-3-5-haiku-20241022' } },
+      update: {
+        description: "Claude 3.5 Haiku - Anthropic's fastest model for quick responses. 200K context, ideal for customer support and real-time interactions.",
+        maxTokens: 200000,
+        inputCost: 0.0008,  // $0.80/1M
+        outputCost: 0.004,  // $4.00/1M
+      },
       create: {
-        name: 'Claude Haiku 4.5',
+        name: 'Claude 3.5 Haiku',
         provider: 'anthropic',
-        modelId: 'claude-haiku-4.5',
+        modelId: 'claude-3-5-haiku-20241022',
         category: 'text',
-        description: 'Fast and efficient for simple tasks',
-        inputCost: 0.0008,
-        outputCost: 0.004,
+        description: "Claude 3.5 Haiku - Anthropic's fastest model for quick responses. 200K context, ideal for customer support and real-time interactions.",
+        inputCost: 0.0008,  // $0.80/1M = $0.0008/1K
+        outputCost: 0.004,  // $4.00/1M = $0.004/1K
         maxTokens: 200000,
       },
     }),
-    // ElevenLabs
+    
+    // ==================== ElevenLabs ====================
+    // Source: https://elevenlabs.io/pricing
     prisma.aIModel.upsert({
       where: { provider_modelId: { provider: 'elevenlabs', modelId: 'eleven_multilingual_v2' } },
-      update: {},
+      update: {
+        description: 'High-quality multilingual text-to-speech. ~$0.30 per 1K characters.',
+        inputCost: 0.0003,  // Per character pricing
+        outputCost: 0,
+      },
       create: {
         name: 'Eleven Multilingual v2',
         provider: 'elevenlabs',
         modelId: 'eleven_multilingual_v2',
         category: 'audio',
-        description: 'High-quality multilingual text-to-speech',
-        inputCost: 0.00024,
+        description: 'High-quality multilingual text-to-speech. ~$0.30 per 1K characters.',
+        inputCost: 0.0003,  // ~$0.30 per 1K chars
         outputCost: 0,
         maxTokens: 0,
       },
@@ -261,7 +341,9 @@ async function main() {
       registrationId: 'STU001',
       courseId: course.id,
       batchId: batch.id,
-      tokenQuota: 10000,
+      tokenQuota: 50000,       // Virtual display tokens
+      budgetLimit: 18,         // USD budget limit (~₹1,500 @ 84 INR/USD)
+      budgetUsed: 0,           // USD spent
       isVerified: true,
     },
   });

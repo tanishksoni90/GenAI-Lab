@@ -4,6 +4,7 @@ import bcrypt from 'bcryptjs';
 import crypto from 'crypto';
 import { config } from '../config';
 import { clearApiKeyCache } from './ai.service';
+import { getModelPricing, pricingUtils, PRICING_CONFIG } from '../config/pricing';
 
 // ==================== HELPER FUNCTIONS ====================
 
@@ -620,30 +621,6 @@ export const getAnalytics = async () => {
   const thirtyDaysAgo = new Date();
   thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
 
-  // Get all models with pricing for cost calculation
-  const allModels = await prisma.aIModel.findMany({
-    select: { id: true, inputCost: true, outputCost: true },
-  });
-  const modelPricingMap = new Map(allModels.map(m => [m.id, { inputCost: m.inputCost, outputCost: m.outputCost }]));
-
-  // Helper function to calculate cost from sessions
-  // Since we don't track input/output separately, estimate 30% input, 70% output (typical for conversations)
-  const calculateCostFromSessions = (sessions: { modelId: string; tokensUsed: number }[]) => {
-    return sessions.reduce((total, session) => {
-      const pricing = modelPricingMap.get(session.modelId);
-      if (!pricing) return total;
-      
-      const inputTokens = Math.floor(session.tokensUsed * 0.3);
-      const outputTokens = session.tokensUsed - inputTokens;
-      
-      // Cost is per 1K tokens, convert to dollars
-      const inputCost = (inputTokens / 1000) * pricing.inputCost;
-      const outputCost = (outputTokens / 1000) * pricing.outputCost;
-      
-      return total + inputCost + outputCost;
-    }, 0);
-  };
-
   // Get total counts (all time / monthly)
   const [
     totalStudents,
@@ -651,6 +628,9 @@ export const getAnalytics = async () => {
     totalSessions,
     totalPrompts,
     totalTokensUsed,
+    totalComparisonSessions,
+    totalComparisonTokens,
+    totalBudgetUsed,
   ] = await Promise.all([
     prisma.user.count({ where: { role: 'student' } }),
     prisma.user.count({ where: { role: 'student', isActive: true } }),
@@ -660,24 +640,76 @@ export const getAnalytics = async () => {
       where: { role: 'student' },
       _sum: { tokenUsed: true },
     }),
+    prisma.comparisonSession.count(),
+    prisma.comparisonSession.aggregate({
+      _sum: { totalTokensUsed: true },
+    }),
+    prisma.user.aggregate({
+      where: { role: 'student' },
+      _sum: { budgetUsed: true },
+    }),
   ]);
 
-  // Get all sessions for cost calculation
+  // Get all sessions with REAL input/output token data and cost
   const allSessions = await prisma.session.findMany({
-    select: { modelId: true, tokensUsed: true, createdAt: true },
+    select: { 
+      modelId: true, 
+      inputTokens: true,
+      outputTokens: true,
+      tokensUsed: true, 
+      totalCost: true,
+      createdAt: true,
+    },
   });
 
-  // Calculate total cost
-  const totalCost = calculateCostFromSessions(allSessions);
+  // Get all comparison sessions with REAL input/output token data and cost
+  const allComparisonSessions = await prisma.comparisonSession.findMany({
+    select: { 
+      totalInputTokens: true,
+      totalOutputTokens: true,
+      totalTokensUsed: true,
+      totalCost: true,
+      createdAt: true,
+    },
+  });
 
-  // Calculate costs by time period
+  // Helper function to sum REAL costs from sessions (no more estimation!)
+  const sumSessionCosts = (sessions: { totalCost: number }[]) => {
+    return sessions.reduce((total, session) => total + (session.totalCost || 0), 0);
+  };
+
+  const sumComparisonCosts = (sessions: { totalCost: number }[]) => {
+    return sessions.reduce((total, session) => total + (session.totalCost || 0), 0);
+  };
+
+  // Calculate REAL costs from sessions (using stored totalCost, not estimation)
+  const totalSessionCost = sumSessionCosts(allSessions);
+  const totalComparisonCost = sumComparisonCosts(allComparisonSessions);
+  const totalCost = totalSessionCost + totalComparisonCost;
+
+  // Calculate costs by time period (regular sessions) - REAL data
   const dailySessionsForCost = allSessions.filter(s => s.createdAt >= startOfToday);
   const weeklySessionsForCost = allSessions.filter(s => s.createdAt >= startOfWeek);
   const monthlySessionsForCost = allSessions.filter(s => s.createdAt >= startOfMonth);
 
-  const dailyCost = calculateCostFromSessions(dailySessionsForCost);
-  const weeklyCost = calculateCostFromSessions(weeklySessionsForCost);
-  const monthlyCost = calculateCostFromSessions(monthlySessionsForCost);
+  const dailyComparisonForCost = allComparisonSessions.filter(s => s.createdAt >= startOfToday);
+  const weeklyComparisonForCost = allComparisonSessions.filter(s => s.createdAt >= startOfWeek);
+  const monthlyComparisonForCost = allComparisonSessions.filter(s => s.createdAt >= startOfMonth);
+
+  const dailyCost = sumSessionCosts(dailySessionsForCost) + sumComparisonCosts(dailyComparisonForCost);
+  const weeklyCost = sumSessionCosts(weeklySessionsForCost) + sumComparisonCosts(weeklyComparisonForCost);
+  const monthlyCost = sumSessionCosts(monthlySessionsForCost) + sumComparisonCosts(monthlyComparisonForCost);
+
+  // Get comparison tokens by time period
+  const dailyComparisonTokens = allComparisonSessions
+    .filter(s => s.createdAt >= startOfToday)
+    .reduce((sum, s) => sum + s.totalTokensUsed, 0);
+  const weeklyComparisonTokens = allComparisonSessions
+    .filter(s => s.createdAt >= startOfWeek)
+    .reduce((sum, s) => sum + s.totalTokensUsed, 0);
+  const monthlyComparisonTokens = allComparisonSessions
+    .filter(s => s.createdAt >= startOfMonth)
+    .reduce((sum, s) => sum + s.totalTokensUsed, 0);
 
   // Get daily active users (users who logged in or had activity today)
   const dailyActiveUsers = await prisma.user.count({
@@ -820,6 +852,7 @@ export const getAnalytics = async () => {
       totalStudents,
       activeStudents,
       totalSessions,
+      totalComparisonSessions,
       totalPrompts,
       totalTokensUsed: totalTokensUsed._sum.tokenUsed || 0,
       totalAgents,
@@ -841,9 +874,21 @@ export const getAnalytics = async () => {
       monthly: monthlyPrompts,
     },
     tokensUsed: {
-      daily: dailyTokens._sum.tokensUsed || 0,
-      weekly: weeklyTokens._sum.tokensUsed || 0,
-      monthly: monthlyTokens._sum.tokensUsed || 0,
+      daily: (dailyTokens._sum.tokensUsed || 0) + dailyComparisonTokens,
+      weekly: (weeklyTokens._sum.tokensUsed || 0) + weeklyComparisonTokens,
+      monthly: (monthlyTokens._sum.tokensUsed || 0) + monthlyComparisonTokens,
+      // Breakdown
+      sessions: {
+        daily: dailyTokens._sum.tokensUsed || 0,
+        weekly: weeklyTokens._sum.tokensUsed || 0,
+        monthly: monthlyTokens._sum.tokensUsed || 0,
+      },
+      comparisons: {
+        daily: dailyComparisonTokens,
+        weekly: weeklyComparisonTokens,
+        monthly: monthlyComparisonTokens,
+        total: totalComparisonTokens._sum.totalTokensUsed || 0,
+      },
     },
     agentsCreated: {
       total: totalAgents,
@@ -851,12 +896,29 @@ export const getAnalytics = async () => {
       weekly: weeklyAgents,
       monthly: monthlyAgents,
     },
-    // Cost analytics (in dollars)
+    // Cost analytics - all values in USD (universal standard)
+    // Now using REAL tracked costs, not estimations
     costs: {
-      total: Math.round(totalCost * 100) / 100, // Round to 2 decimal places
-      daily: Math.round(dailyCost * 100) / 100,
-      weekly: Math.round(weeklyCost * 100) / 100,
-      monthly: Math.round(monthlyCost * 100) / 100,
+      currency: 'USD',
+      // Actual tracked costs from user budgetUsed (most accurate)
+      total: Math.round((totalBudgetUsed._sum.budgetUsed || 0) * 10000) / 10000,
+      // REAL costs by period (from stored session/comparison costs)
+      daily: Math.round(dailyCost * 10000) / 10000,
+      weekly: Math.round(weeklyCost * 10000) / 10000,
+      monthly: Math.round(monthlyCost * 10000) / 10000,
+      // Breakdown by source
+      breakdown: {
+        sessions: Math.round(totalSessionCost * 10000) / 10000,
+        comparisons: Math.round(totalComparisonCost * 10000) / 10000,
+      },
+      // INR equivalents for display (using configurable exchange rate)
+      inrEquivalent: {
+        exchangeRate: PRICING_CONFIG.USD_TO_INR,
+        total: Math.round(pricingUtils.usdToInr(totalBudgetUsed._sum.budgetUsed || 0) * 100) / 100,
+        daily: Math.round(pricingUtils.usdToInr(dailyCost) * 100) / 100,
+        weekly: Math.round(pricingUtils.usdToInr(weeklyCost) * 100) / 100,
+        monthly: Math.round(pricingUtils.usdToInr(monthlyCost) * 100) / 100,
+      },
     },
     dailyActivity,
     modelUsage: modelUsageWithDetails,

@@ -403,6 +403,53 @@ export const sessionsApi = {
       body: JSON.stringify({ content }),
     }),
 
+  // Streaming version of sendMessage
+  sendMessageStreaming: async function* (sessionId: string, content: string) {
+    const token = getToken();
+    const response = await fetch(`${API_BASE_URL}/sessions/${sessionId}/messages/stream`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(token && { Authorization: `Bearer ${token}` }),
+      },
+      body: JSON.stringify({ content }),
+    });
+
+    if (!response.ok) {
+      throw new Error(`HTTP error! status: ${response.status}`);
+    }
+
+    const reader = response.body?.getReader();
+    if (!reader) {
+      throw new Error('No response body');
+    }
+
+    const decoder = new TextDecoder();
+    let buffer = '';
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split('\n');
+      buffer = lines.pop() || '';
+
+      for (const line of lines) {
+        if (line.startsWith('data: ')) {
+          const data = JSON.parse(line.slice(6));
+          yield data;
+        }
+      }
+    }
+
+    // Process any remaining data
+    if (buffer.startsWith('data: ')) {
+      const data = JSON.parse(buffer.slice(6));
+      yield data;
+    }
+  },
+
   getMessages: (sessionId: string) =>
     apiRequest<ApiResponse<{ messages: Message[] }>>(`/sessions/${sessionId}/messages`),
 
@@ -986,6 +1033,223 @@ export interface TokenSettings {
   strictMode: boolean;
 }
 
+// ==================== Comparison API ====================
+
+export interface ComparisonModel {
+  id: string;
+  name: string;
+  provider: string;
+  modelId: string;
+  category: string;
+  description: string | null;
+  maxTokens: number;
+}
+
+export interface ComparisonResponse {
+  modelId: string;
+  modelName: string;
+  provider: string;
+  response: string;
+  tokensUsed: number;
+  responseTimeMs: number;
+  score: number | null;
+  isMock: boolean;
+  error: string | null;
+}
+
+export interface CompareResult {
+  comparisonSessionId: string;
+  exchangeId: string;
+  prompt: string;
+  responses: ComparisonResponse[];
+  totalTokensUsed: number;
+}
+
+export interface StartExchangeResult {
+  comparisonSessionId: string;
+  exchangeId: string;
+  prompt: string;
+  promptScore: number | null;
+  models: Array<{
+    id: string;
+    name: string;
+    provider: string;
+  }>;
+}
+
+export interface ComparisonSessionSummary {
+  id: string;
+  category: string;
+  title: string | null;
+  totalTokensUsed: number;
+  exchangeCount: number;
+  lastPrompt: string | null;
+  modelsUsed: string[];
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ComparisonExchange {
+  id: string;
+  prompt: string;
+  responses: Array<{
+    id: string;
+    modelId: string;
+    modelName: string;
+    provider: string;
+    response: string;
+    tokensUsed: number;
+    responseTimeMs: number;
+    score: number | null;
+    isMock: boolean;
+    error: string | null;
+    createdAt: string;
+  }>;
+  createdAt: string;
+}
+
+export interface ComparisonSessionDetails {
+  id: string;
+  category: string;
+  title: string | null;
+  totalTokensUsed: number;
+  createdAt: string;
+  updatedAt: string;
+  exchanges: ComparisonExchange[];
+}
+
+export const comparisonApi = {
+  // Get available categories
+  getCategories: () =>
+    apiRequest<ApiResponse<string[]>>('/comparison/categories'),
+
+  // Get models by category
+  getModelsByCategory: (category: string) =>
+    apiRequest<ApiResponse<ComparisonModel[]>>(`/comparison/models/${category}`),
+
+  // Start a comparison exchange - creates session/exchange, returns IDs
+  startExchange: (data: {
+    category: string;
+    modelIds: string[];
+    prompt: string;
+    comparisonSessionId?: string;
+  }) =>
+    apiRequest<ApiResponse<StartExchangeResult>>('/comparison/start-exchange', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+
+  // Run a single model comparison - called independently for each model
+  runSingleModel: (data: {
+    modelId: string;
+    prompt: string;
+    exchangeId: string;
+  }) =>
+    apiRequest<ApiResponse<ComparisonResponse>>('/comparison/run-model', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+
+  // Stream a single model's response - returns an async generator
+  streamSingleModel: async function* (data: {
+    modelId: string;
+    prompt: string;
+    exchangeId: string;
+  }): AsyncGenerator<{
+    type: 'start' | 'chunk' | 'done' | 'error';
+    content?: string;
+    modelId?: string;
+    modelName?: string;
+    provider?: string;
+    tokensUsed?: number;
+    responseTimeMs?: number;
+    isMock?: boolean;
+    error?: string;
+  }> {
+    const token = getToken();
+    
+    const response = await fetch(`${API_BASE_URL}/comparison/stream-model`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      },
+      body: JSON.stringify(data),
+    });
+
+    if (!response.ok) {
+      throw new Error(`HTTP error! status: ${response.status}`);
+    }
+
+    const reader = response.body?.getReader();
+    if (!reader) {
+      throw new Error('No response body');
+    }
+
+    const decoder = new TextDecoder();
+    let buffer = '';
+
+    while (true) {
+      const { done, value } = await reader.read();
+      
+      if (done) break;
+
+      buffer += decoder.decode(value, { stream: true });
+      
+      // Process complete SSE messages
+      const lines = buffer.split('\n');
+      buffer = lines.pop() || ''; // Keep incomplete line in buffer
+
+      for (const line of lines) {
+        if (line.startsWith('data: ')) {
+          try {
+            const data = JSON.parse(line.slice(6));
+            yield data;
+          } catch (e) {
+            // Skip invalid JSON
+          }
+        }
+      }
+    }
+
+    // Process any remaining data
+    if (buffer.startsWith('data: ')) {
+      try {
+        const data = JSON.parse(buffer.slice(6));
+        yield data;
+      } catch (e) {
+        // Skip invalid JSON
+      }
+    }
+  },
+
+  // Compare models (legacy - waits for all)
+  compare: (data: {
+    category: string;
+    modelIds: string[];
+    prompt: string;
+    comparisonSessionId?: string;
+  }) =>
+    apiRequest<ApiResponse<CompareResult>>('/comparison/compare', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+
+  // Get user's comparison sessions
+  getSessions: () =>
+    apiRequest<ApiResponse<ComparisonSessionSummary[]>>('/comparison/sessions'),
+
+  // Get session details
+  getSessionDetails: (sessionId: string) =>
+    apiRequest<ApiResponse<ComparisonSessionDetails>>(`/comparison/sessions/${sessionId}`),
+
+  // Delete session
+  deleteSession: (sessionId: string) =>
+    apiRequest<ApiResponse<null>>(`/comparison/sessions/${sessionId}`, {
+      method: 'DELETE',
+    }),
+};
+
 export default {
   auth: authApi,
   models: modelsApi,
@@ -994,5 +1258,6 @@ export default {
   agents: agentsApi,
   artifacts: artifactsApi,
   admin: adminApi,
+  comparison: comparisonApi,
 };
 

@@ -114,3 +114,56 @@ export const endSession = async (
   }
 };
 
+// Send a message with streaming response
+export const sendMessageStreaming = async (
+  req: Request,
+  res: Response,
+  next: NextFunction
+) => {
+  try {
+    const { content } = req.body;
+    const sessionId = req.params.id;
+    const userId = req.user!.id;
+
+    // Set SSE headers
+    res.setHeader('Content-Type', 'text/event-stream');
+    res.setHeader('Cache-Control', 'no-cache');
+    res.setHeader('Connection', 'keep-alive');
+    res.setHeader('Access-Control-Allow-Origin', '*');
+
+    // Send start event
+    res.write(`data: ${JSON.stringify({ type: 'start' })}\n\n`);
+
+    // Stream response
+    const result = await sessionService.sendMessageStreaming(
+      sessionId,
+      userId,
+      content,
+      (chunk: string, done: boolean) => {
+        if (done) {
+          return;
+        }
+        res.write(`data: ${JSON.stringify({ type: 'chunk', content: chunk })}\n\n`);
+      }
+    );
+
+    // Send done event with full result
+    res.write(`data: ${JSON.stringify({
+      type: 'done',
+      userMessage: result.userMessage,
+      assistantMessage: result.assistantMessage,
+      tokensUsed: result.tokensUsed,
+      isMock: result.isMock,
+    })}\n\n`);
+
+    res.end();
+  } catch (error: any) {
+    // Send error event
+    res.write(`data: ${JSON.stringify({
+      type: 'error',
+      error: error.message || 'An error occurred',
+    })}\n\n`);
+    res.end();
+  }
+};
+
