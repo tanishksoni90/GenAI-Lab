@@ -1528,17 +1528,13 @@ export const updateSettings = async (input: UpdateSettingsInput) => {
 
 // Fix users who have exceeded their token quota (cap tokenUsed at tokenQuota)
 export const fixExceededQuotas = async () => {
-  // Find all users where tokenUsed > tokenQuota
-  const exceededUsers = await prisma.user.findMany({
-    where: {
-      tokenUsed: {
-        gt: prisma.user.fields.tokenQuota,
-      },
-    },
-    select: { id: true, email: true, tokenUsed: true, tokenQuota: true },
-  });
+  // First, get the count of users to fix (for reporting)
+  const exceededUsers = await prisma.$queryRaw<Array<{ count: number }>>`
+    SELECT COUNT(*) as count FROM User WHERE tokenUsed > tokenQuota
+  `;
+  const countToFix = exceededUsers[0]?.count || 0;
 
-  // This raw query approach is more reliable for comparing columns
+  // Use raw query to compare and update columns (Prisma doesn't support column-to-column comparison)
   const result = await prisma.$executeRaw`
     UPDATE User 
     SET tokenUsed = tokenQuota, updatedAt = datetime('now')
@@ -1547,7 +1543,8 @@ export const fixExceededQuotas = async () => {
 
   return {
     message: `Fixed ${result} user(s) with exceeded quotas`,
-    fixedCount: result,
+    fixedCount: Number(result),
+    foundCount: Number(countToFix),
   };
 };
 
