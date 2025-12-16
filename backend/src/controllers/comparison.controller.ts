@@ -3,7 +3,7 @@ import * as comparisonService from '../services/comparison.service';
 import { sendSuccess } from '../utils/response';
 import { streamWithModel } from '../services/ai.service';
 import { prisma } from '../lib/prisma';
-import { calculateModelCostUSD } from '../config/pricing';
+import { calculateModelCostUSD, pricingUtils } from '../config/pricing';
 
 // Get available categories for comparison
 export const getCategories = async (
@@ -282,17 +282,20 @@ export const streamSingleModel = async (
       },
     });
 
-    // Update user's token usage and budget
-    if (totalTokens > 0) {
+    // Update user's virtual token usage and budget
+    if (cost > 0) {
+      // Convert USD cost to virtual tokens for consistent quota tracking
+      const virtualTokensToAdd = pricingUtils.usdToVirtualTokens(cost);
+      
       await prisma.user.update({
         where: { id: userId },
         data: {
-          tokenUsed: { increment: totalTokens },
+          tokenUsed: { increment: virtualTokensToAdd },
           budgetUsed: { increment: cost },
         },
       });
 
-      // Update session totals with separate input/output tracking
+      // Update session totals with real token counts (for analytics)
       if (exchange) {
         await prisma.comparisonSession.update({
           where: { id: exchange.comparisonSessionId },

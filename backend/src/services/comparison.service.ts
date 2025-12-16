@@ -2,7 +2,7 @@ import { prisma } from '../lib/prisma';
 import { NotFoundError, BadRequestError } from '../utils/errors';
 import { chatWithModel, getModelsByCategory } from './ai.service';
 import { scorePrompt } from './scoring.service';
-import { calculateModelCostUSD } from '../config/pricing';
+import { calculateModelCostUSD, pricingUtils } from '../config/pricing';
 
 // Types
 interface CompareInput {
@@ -323,17 +323,20 @@ export const runSingleModelComparison = async (input: SingleModelInput): Promise
     },
   });
 
-  // Update user's token usage and budget
-  if (result.tokensUsed > 0) {
+  // Update user's virtual token usage and budget
+  if (result.cost > 0) {
+    // Convert USD cost to virtual tokens for consistent quota tracking
+    const virtualTokensToAdd = pricingUtils.usdToVirtualTokens(result.cost);
+    
     await prisma.user.update({
       where: { id: userId },
       data: {
-        tokenUsed: { increment: result.tokensUsed },
+        tokenUsed: { increment: virtualTokensToAdd },
         budgetUsed: { increment: result.cost },
       },
     });
 
-    // Update session totals with separate input/output tracking
+    // Update session totals with real token counts (for analytics)
     await prisma.comparisonSession.update({
       where: { id: exchangeData.comparisonSessionId },
       data: {
@@ -495,11 +498,14 @@ export const compareModels = async (input: CompareInput): Promise<CompareResult>
     },
   });
 
-  // Update user's token usage and budget
+  // Update user's virtual token usage and budget
+  // Convert USD cost to virtual tokens for consistent quota tracking
+  const virtualTokensToAdd = pricingUtils.usdToVirtualTokens(totalCost);
+  
   await prisma.user.update({
     where: { id: userId },
     data: {
-      tokenUsed: { increment: totalTokensUsed },
+      tokenUsed: { increment: virtualTokensToAdd },
       budgetUsed: { increment: totalCost },
     },
   });

@@ -3,7 +3,7 @@ import { NotFoundError, InsufficientTokensError, ForbiddenError } from '../utils
 import * as aiService from './ai.service';
 import * as scoringService from './scoring.service';
 import { StreamCallback } from './ai.service';
-import { calculateModelCostUSD, getModelPricing } from '../config/pricing';
+import { calculateModelCostUSD, getModelPricing, pricingUtils } from '../config/pricing';
 
 // Helper to check if hard limit enforcement is enabled
 async function isHardLimitEnforced(): Promise<boolean> {
@@ -259,24 +259,27 @@ export const sendMessage = async (
   });
   
   const hardLimitEnabled = await isHardLimitEnforced();
-  let tokensToAdd = totalTokens;
   
-  // If hard limit is enabled, cap the token usage at the quota
+  // Convert USD cost to virtual tokens for consistent quota tracking
+  // Formula: Virtual Tokens = (USD Spent / Budget Limit USD) × Display Tokens
+  let virtualTokensToAdd = pricingUtils.usdToVirtualTokens(costUSD);
+  
+  // If hard limit is enabled, cap the virtual token usage at the quota
   if (hardLimitEnabled && currentUser) {
     const remainingQuota = Math.max(0, currentUser.tokenQuota - currentUser.tokenUsed);
-    tokensToAdd = Math.min(tokensToAdd, remainingQuota);
+    virtualTokensToAdd = Math.min(virtualTokensToAdd, remainingQuota);
   }
 
-  // Update user's budget (cost tracking in USD)
+  // Update user's budget (cost in USD) and virtual tokens
   await prisma.user.update({
     where: { id: userId },
     data: {
-      tokenUsed: { increment: tokensToAdd },
+      tokenUsed: { increment: virtualTokensToAdd },
       budgetUsed: { increment: costUSD },
     },
   });
 
-  // Update agent stats if applicable
+  // Update agent stats if applicable (use real tokens for agent stats)
   if (session.agentId) {
     await prisma.agent.update({
       where: { id: session.agentId },
@@ -495,18 +498,20 @@ export const sendMessageStreaming = async (
   });
   
   const hardLimitEnabled = await isHardLimitEnforced();
-  let tokensToAdd = totalTokens;
+  
+  // Convert USD cost to virtual tokens for consistent quota tracking
+  let virtualTokensToAdd = pricingUtils.usdToVirtualTokens(costUSD);
   
   if (hardLimitEnabled && currentUser) {
     const remainingQuota = Math.max(0, currentUser.tokenQuota - currentUser.tokenUsed);
-    tokensToAdd = Math.min(tokensToAdd, remainingQuota);
+    virtualTokensToAdd = Math.min(virtualTokensToAdd, remainingQuota);
   }
 
-  // Update user's budget (cost tracking in USD)
+  // Update user's budget (cost in USD) and virtual tokens
   await prisma.user.update({
     where: { id: userId },
     data: {
-      tokenUsed: { increment: tokensToAdd },
+      tokenUsed: { increment: virtualTokensToAdd },
       budgetUsed: { increment: costUSD },
     },
   });
