@@ -1192,6 +1192,11 @@ export const updateGuardrail = async (
 export const deleteGuardrail = async (guardrailId: string) => {
   const guardrail = await prisma.guardrail.findUnique({
     where: { id: guardrailId },
+    include: {
+      agentGuardrails: {
+        select: { id: true },
+      },
+    },
   });
 
   if (!guardrail) {
@@ -1202,8 +1207,20 @@ export const deleteGuardrail = async (guardrailId: string) => {
     throw new BadRequestError('Cannot delete system guardrails');
   }
 
-  await prisma.guardrail.delete({
-    where: { id: guardrailId },
+  // Use transaction to delete AgentGuardrail records first, then the guardrail
+  // This is necessary because the foreign key constraint is RESTRICT (default)
+  await prisma.$transaction(async (tx) => {
+    // First, remove all AgentGuardrail associations
+    if (guardrail.agentGuardrails.length > 0) {
+      await tx.agentGuardrail.deleteMany({
+        where: { guardrailId },
+      });
+    }
+
+    // Then delete the guardrail itself
+    await tx.guardrail.delete({
+      where: { id: guardrailId },
+    });
   });
 
   return { message: 'Guardrail deleted' };
