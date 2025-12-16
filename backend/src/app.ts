@@ -29,10 +29,10 @@ app.use(cors({
   allowedHeaders: ['Content-Type', 'Authorization'],
 }));
 
-// Rate limiting - higher limits for development
+// Rate limiting - protect against abuse
 const limiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 1000, // Limit each IP to 1000 requests per window (increased for dev)
+  max: 100, // Limit each IP to 100 requests per 15-minute window
   message: { success: false, error: 'Too many requests, please try again later' },
   standardHeaders: true,
   legacyHeaders: false,
