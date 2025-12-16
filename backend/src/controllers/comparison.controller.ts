@@ -3,6 +3,7 @@ import * as comparisonService from '../services/comparison.service';
 import { sendSuccess } from '../utils/response';
 import { streamWithModel } from '../services/ai.service';
 import { prisma } from '../lib/prisma';
+import { calculateModelCostUSD } from '../config/pricing';
 
 // Get available categories for comparison
 export const getCategories = async (
@@ -254,16 +255,15 @@ export const streamSingleModel = async (
 
     const responseTime = Date.now() - startTime;
 
-    // Calculate cost in INR using actual token counts from API
-    const inputTokens = result.inputTokens;
-    const outputTokens = result.outputTokens;
+    // Calculate cost in USD using actual token counts from API
+    const inputTokens = result.inputTokens || 0;
+    const outputTokens = result.outputTokens || 0;
+    const totalTokens = inputTokens + outputTokens;
     
-    // Cost per 1K tokens in INR
-    const inputCostINR = (inputTokens / 1000) * model.inputCostINR;
-    const outputCostINR = (outputTokens / 1000) * model.outputCostINR;
-    const totalCostINR = inputCostINR + outputCostINR;
+    // Calculate cost using USD pricing
+    const cost = calculateModelCostUSD(model.modelId, inputTokens, outputTokens);
 
-    // Save to database
+    // Save to database with all required fields including cost
     await prisma.comparisonResponse.create({
       data: {
         comparisonExchangeId: exchangeId,
@@ -271,7 +271,10 @@ export const streamSingleModel = async (
         modelName: model.name,
         provider: model.provider,
         response: fullResponse,
-        tokensUsed,
+        inputTokens,
+        outputTokens,
+        tokensUsed: totalTokens,
+        cost,
         responseTimeMs: responseTime,
         score: null,
         isMock,
@@ -280,21 +283,24 @@ export const streamSingleModel = async (
     });
 
     // Update user's token usage and budget
-    if (tokensUsed > 0) {
+    if (totalTokens > 0) {
       await prisma.user.update({
         where: { id: userId },
         data: {
-          tokenUsed: { increment: tokensUsed },
-          budgetUsed: { increment: totalCostINR },
+          tokenUsed: { increment: totalTokens },
+          budgetUsed: { increment: cost },
         },
       });
 
-      // Update session total tokens
+      // Update session totals with separate input/output tracking
       if (exchange) {
         await prisma.comparisonSession.update({
           where: { id: exchange.comparisonSessionId },
           data: {
-            totalTokensUsed: { increment: tokensUsed },
+            totalInputTokens: { increment: inputTokens },
+            totalOutputTokens: { increment: outputTokens },
+            totalTokensUsed: { increment: totalTokens },
+            totalCost: { increment: cost },
           },
         });
       }
@@ -303,9 +309,11 @@ export const streamSingleModel = async (
     // Send completion event
     res.write(`data: ${JSON.stringify({ 
       type: 'done', 
-      tokensUsed,
+      inputTokens,
+      outputTokens,
+      tokensUsed: totalTokens,
       responseTimeMs: responseTime,
-      costINR: totalCostINR,
+      cost,
       isMock
     })}\n\n`);
 

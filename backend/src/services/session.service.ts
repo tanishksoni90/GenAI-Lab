@@ -380,6 +380,9 @@ export const sendMessageStreaming = async (
   userMessage: any;
   assistantMessage: any;
   tokensUsed: number;
+  inputTokens: number;
+  outputTokens: number;
+  cost: number;
   isMock: boolean;
 }> => {
   // Get session with messages
