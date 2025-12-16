@@ -456,5 +456,4 @@ This project is proprietary software developed for educational purposes. All rig
 ---
 
 <p align="center">
-  <sub>Built with ❤️ for the future of AI education</sub>
 </p>
