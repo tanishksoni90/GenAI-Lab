@@ -571,9 +571,11 @@ const AdminDashboard = () => {
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-4">
               <div className="flex items-center gap-3">
-                <div className="w-8 h-8 rounded-lg gradient-primary flex items-center justify-center">
-                  <Zap className="w-4 h-4 text-white" />
-                </div>
+                <img 
+                  src="/genai-lab-logo.svg" 
+                  alt="GenAI Lab Logo" 
+                  className="w-8 h-8 rounded-lg"
+                />
                 <div>
                   <h1 className="text-lg font-bold">GenAI Lab</h1>
                   <p className="text-xs text-muted-foreground">Thrivetogether Institution India</p>

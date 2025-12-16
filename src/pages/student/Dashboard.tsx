@@ -505,9 +505,11 @@ const StudentDashboard = () => {
         <div className="px-6 py-4">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-xl gradient-secondary glow-secondary flex items-center justify-center">
-                <GraduationCap className="w-5 h-5 text-white" />
-              </div>
+              <img 
+                src="/genai-lab-logo.svg" 
+                alt="GenAI Lab Logo" 
+                className="w-10 h-10 rounded-xl"
+              />
               <div>
                 <h1 className="text-xl font-bold">Welcome back, {userName}!</h1>
                 <p className="text-sm text-muted-foreground">Continue your AI journey</p>
