@@ -207,9 +207,11 @@ const Landing = () => {
       <nav className="sticky top-0 z-[100] px-6 py-4 glass border-b border-white/5 backdrop-blur-xl">
         <div className="max-w-7xl mx-auto flex items-center justify-between">
           <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl gradient-primary glow-primary flex items-center justify-center">
-              <Brain className="w-5 h-5 text-white" />
-            </div>
+            <img 
+              src="/genai-lab-logo.svg" 
+              alt="GenAI Lab Logo" 
+              className="w-10 h-10 rounded-xl"
+            />
             <span className="text-xl font-bold">GenAI Lab</span>
           </div>
           <div className="hidden md:flex items-center gap-8">
@@ -601,9 +603,11 @@ const Landing = () => {
         <div className="max-w-7xl mx-auto">
           <div className="flex flex-col md:flex-row items-center justify-between gap-6">
             <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-xl gradient-primary glow-primary flex items-center justify-center">
-                <Brain className="w-5 h-5 text-white" />
-              </div>
+              <img 
+                src="/genai-lab-logo.svg" 
+                alt="GenAI Lab Logo" 
+                className="w-10 h-10 rounded-xl"
+              />
               <span className="text-xl font-bold">GenAI Lab</span>
             </div>
             <div className="flex items-center gap-6 text-sm text-muted-foreground">

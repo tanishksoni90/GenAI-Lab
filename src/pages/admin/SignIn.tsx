@@ -54,8 +54,12 @@ const AdminSignIn = () => {
       <div className="relative z-10 w-full max-w-md animate-scale-in">
         <Card className="glass-card border-gradient">
           <CardHeader className="space-y-6 text-center pb-8">
-            <div className="w-20 h-20 rounded-3xl gradient-primary glow-primary flex items-center justify-center mx-auto animate-float relative">
-              <Shield className="w-10 h-10 text-white" />
+            <div className="relative mx-auto">
+              <img 
+                src="/genai-lab-logo.svg" 
+                alt="GenAI Lab Logo" 
+                className="w-20 h-20 animate-float rounded-2xl"
+              />
               <div className="absolute -top-1 -right-1 w-6 h-6 rounded-full gradient-accent flex items-center justify-center animate-pulse">
                 <ShieldCheck className="w-4 h-4 text-white" />
               </div>

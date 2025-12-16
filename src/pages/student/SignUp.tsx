@@ -119,9 +119,11 @@ const StudentSignUp = () => {
       <div className="relative z-10 w-full max-w-md animate-scale-in">
         <Card className="glass-card border-gradient">
           <CardHeader className="space-y-6 text-center pb-6">
-            <div className="w-20 h-20 rounded-3xl gradient-accent glow-accent flex items-center justify-center mx-auto animate-float">
-              <GraduationCap className="w-10 h-10 text-white" />
-            </div>
+            <img 
+              src="/genai-lab-logo.svg" 
+              alt="GenAI Lab Logo" 
+              className="w-20 h-20 mx-auto animate-float rounded-2xl"
+            />
             <div className="space-y-3">
               <CardTitle className="text-4xl font-bold text-gradient-warm tracking-tight">
                 Join the Journey
