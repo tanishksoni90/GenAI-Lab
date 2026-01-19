@@ -115,6 +115,9 @@ export const getSession = async (sessionId: string, userId: string) => {
 };
 
 // Get user's sessions
+// Maximum pagination limit to prevent memory issues
+const MAX_PAGE_LIMIT = 100;
+
 export const getUserSessions = async (
   userId: string,
   options: {
@@ -124,7 +127,9 @@ export const getUserSessions = async (
     agentId?: string;
   } = {}
 ) => {
-  const { page = 1, limit = 20, modelId, agentId } = options;
+  // Enforce maximum limit to prevent memory issues
+  const { page = 1, modelId, agentId } = options;
+  const limit = Math.min(options.limit || 20, MAX_PAGE_LIMIT);
   const skip = (page - 1) * limit;
 
   const where: any = { userId };

@@ -6,6 +6,7 @@ import { config } from '../config';
 import { clearApiKeyCache } from './ai.service';
 import { getModelPricing, pricingUtils, PRICING_CONFIG } from '../config/pricing';
 import { encrypt, decrypt, maskSensitiveValue } from '../utils/encryption';
+import { logAdminAction } from '../utils/audit';
 
 // ==================== HELPER FUNCTIONS ====================
 
@@ -61,6 +62,9 @@ interface BulkOperationInput {
   value?: any; // For status: boolean, for tokens: number
 }
 
+// Maximum pagination limit to prevent memory issues
+const MAX_PAGE_LIMIT = 100;
+
 // Get all students with pagination and filters
 export const getStudents = async (options: {
   page?: number;
@@ -70,7 +74,9 @@ export const getStudents = async (options: {
   search?: string;
   isActive?: boolean;
 } = {}) => {
-  const { page = 1, limit = 20, courseId, batchId, search, isActive } = options;
+  // Enforce maximum limit to prevent memory issues
+  const { page = 1, courseId, batchId, search, isActive } = options;
+  const limit = Math.min(options.limit || 20, MAX_PAGE_LIMIT);
   const skip = (page - 1) * limit;
 
   const where: any = { role: 'student' };
@@ -202,7 +208,7 @@ export const getStudent = async (studentId: string) => {
 };
 
 // Create a new student
-export const createStudent = async (input: CreateStudentInput) => {
+export const createStudent = async (input: CreateStudentInput, adminUserId?: string) => {
   const { email, name, registrationId, courseId, batchId, tokenLimit } = input;
 
   // Check if email exists
@@ -217,8 +223,8 @@ export const createStudent = async (input: CreateStudentInput) => {
     throw new ConflictError('Registration ID already exists');
   }
 
-  // Generate default password (can be reset later)
-  const defaultPassword = `${registrationId}@GenAI`;
+  // Generate secure random password (NOT predictable from user data)
+  const defaultPassword = generateSecurePassword();
   const hashedPassword = await bcrypt.hash(defaultPassword, 12);
 
   const student = await prisma.user.create({
@@ -244,14 +250,24 @@ export const createStudent = async (input: CreateStudentInput) => {
     },
   });
 
+  // Audit log: student creation
+  if (adminUserId) {
+    await logAdminAction(adminUserId, 'admin_create_student', {
+      targetUserId: student.id,
+      targetUserEmail: student.email,
+      targetUserRegistrationId: student.registrationId,
+      tokenQuota: student.tokenQuota,
+    });
+  }
+
   return { student, defaultPassword };
 };
 
 // Update student
-export const updateStudent = async (studentId: string, input: UpdateStudentInput) => {
+export const updateStudent = async (studentId: string, input: UpdateStudentInput, adminUserId?: string) => {
   const student = await prisma.user.findUnique({
     where: { id: studentId },
-    select: { role: true },
+    select: { role: true, email: true, registrationId: true, tokenQuota: true, isActive: true },
   });
 
   if (!student) {
@@ -272,7 +288,19 @@ export const updateStudent = async (studentId: string, input: UpdateStudentInput
     }
   }
 
-  return prisma.user.update({
+  // Track changes for audit log
+  const changes: Record<string, { from: unknown; to: unknown }> = {};
+  if (input.tokenQuota !== undefined && input.tokenQuota !== student.tokenQuota) {
+    changes.tokenQuota = { from: student.tokenQuota, to: input.tokenQuota };
+  }
+  if (input.isActive !== undefined && input.isActive !== student.isActive) {
+    changes.isActive = { from: student.isActive, to: input.isActive };
+  }
+  if (input.email !== undefined && input.email !== student.email) {
+    changes.email = { from: student.email, to: input.email };
+  }
+
+  const updatedStudent = await prisma.user.update({
     where: { id: studentId },
     data: input,
     select: {
@@ -287,13 +315,25 @@ export const updateStudent = async (studentId: string, input: UpdateStudentInput
       batch: { select: { id: true, name: true } },
     },
   });
+
+  // Audit log: student update
+  if (adminUserId && Object.keys(changes).length > 0) {
+    await logAdminAction(adminUserId, 'admin_update_student', {
+      targetUserId: studentId,
+      targetUserEmail: student.email,
+      targetUserRegistrationId: student.registrationId,
+      changes,
+    });
+  }
+
+  return updatedStudent;
 };
 
 // Delete student
-export const deleteStudent = async (studentId: string, permanent: boolean = false) => {
+export const deleteStudent = async (studentId: string, permanent: boolean = false, adminUserId?: string) => {
   const student = await prisma.user.findUnique({
     where: { id: studentId },
-    select: { role: true },
+    select: { role: true, email: true, registrationId: true },
   });
 
   if (!student) {
@@ -307,6 +347,17 @@ export const deleteStudent = async (studentId: string, permanent: boolean = fals
   if (permanent) {
     // Permanently delete student and all related data
     await prisma.user.delete({ where: { id: studentId } });
+    
+    // Audit log: permanent deletion
+    if (adminUserId) {
+      await logAdminAction(adminUserId, 'admin_delete_student', {
+        targetUserId: studentId,
+        targetUserEmail: student.email,
+        targetUserRegistrationId: student.registrationId,
+        permanent: true,
+      });
+    }
+    
     return { message: 'Student permanently deleted' };
   } else {
     // Soft delete (deactivate)
@@ -314,15 +365,26 @@ export const deleteStudent = async (studentId: string, permanent: boolean = fals
       where: { id: studentId },
       data: { isActive: false },
     });
+    
+    // Audit log: soft deletion
+    if (adminUserId) {
+      await logAdminAction(adminUserId, 'admin_delete_student', {
+        targetUserId: studentId,
+        targetUserEmail: student.email,
+        targetUserRegistrationId: student.registrationId,
+        permanent: false,
+      });
+    }
+    
     return { message: 'Student deactivated' };
   }
 };
 
 // Reset student password
-export const resetStudentPassword = async (studentId: string) => {
+export const resetStudentPassword = async (studentId: string, adminUserId?: string) => {
   const student = await prisma.user.findUnique({
     where: { id: studentId },
-    select: { registrationId: true, role: true },
+    select: { registrationId: true, role: true, email: true },
   });
 
   if (!student) {
@@ -345,11 +407,20 @@ export const resetStudentPassword = async (studentId: string) => {
     },
   });
 
+  // Audit log: password reset
+  if (adminUserId) {
+    await logAdminAction(adminUserId, 'admin_reset_password', {
+      targetUserId: studentId,
+      targetUserEmail: student.email,
+      targetUserRegistrationId: student.registrationId,
+    });
+  }
+
   return { newPassword };
 };
 
 // Bulk operations
-export const bulkOperation = async (input: BulkOperationInput) => {
+export const bulkOperation = async (input: BulkOperationInput, adminUserId?: string) => {
   const { operation, registrationIds, value } = input;
 
   // Find students by registration IDs
@@ -358,7 +429,7 @@ export const bulkOperation = async (input: BulkOperationInput) => {
       registrationId: { in: registrationIds },
       role: 'student',
     },
-    select: { id: true, registrationId: true },
+    select: { id: true, registrationId: true, email: true },
   });
 
   if (students.length === 0) {
@@ -413,6 +484,16 @@ export const bulkOperation = async (input: BulkOperationInput) => {
       throw new BadRequestError('Invalid operation');
   }
 
+  // Audit log: bulk operation
+  if (adminUserId) {
+    await logAdminAction(adminUserId, 'admin_bulk_operation', {
+      operation,
+      affectedCount: students.length,
+      registrationIds: students.map(s => s.registrationId),
+      value: operation !== 'reset_passwords' ? value : '[REDACTED]',
+    });
+  }
+
   return {
     operation,
     affected: students.length,
@@ -459,8 +540,8 @@ export const importStudents = async (
         continue;
       }
 
-      // Create student
-      const defaultPassword = `${studentData.registrationId}@GenAI`;
+      // Create student with secure random password
+      const defaultPassword = generateSecurePassword();
       const hashedPassword = await bcrypt.hash(defaultPassword, 12);
 
       await prisma.user.create({
