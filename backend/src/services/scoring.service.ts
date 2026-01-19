@@ -71,6 +71,8 @@ export interface ScoreResult {
   feedback: string;
   comparison?: string;
   analysisSource: 'gemini' | 'rule-based';
+  /** Analysis cost in USD - for transparency to students */
+  analysisCostUSD?: number;
 }
 
 interface ConversationMessage {
@@ -267,6 +269,7 @@ Respond with ONLY a valid JSON object in this exact format, no markdown code blo
       feedback: parsed.overallFeedback || 'Analysis complete',
       comparison: parsed.improvedPromptSuggestion,
       analysisSource: 'gemini',
+      analysisCostUSD: costUSD, // Expose cost for transparency
     };
   } catch (error: any) {
     // Log the error but DON'T silently return null
@@ -430,6 +433,7 @@ function scoreWithRules(prompt: string, conversationHistory: ConversationMessage
     criteria,
     feedback: overallFeedback,
     analysisSource: 'rule-based',
+    analysisCostUSD: 0, // Rule-based scoring is free
   };
 }
 

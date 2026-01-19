@@ -60,6 +60,8 @@ interface ChatMessage {
   guidingQuestions?: string[];
   createdAt?: string;
   isStreaming?: boolean;
+  /** Analysis cost in USD - for transparency */
+  analysisCostUSD?: number;
 }
 
 const StudentChat = () => {
@@ -245,6 +247,7 @@ const StudentChat = () => {
           scoreBreakdown,
           feedback: feedbackData,
           comparison: scoreResult?.comparison,
+          analysisCostUSD: scoreResult?.analysisCostUSD,
         };
       });
       setMessages(chatMessages);
@@ -505,6 +508,7 @@ const StudentChat = () => {
                 feedback: feedbackData,
                 scoreBreakdown,
                 comparison: scoreResult?.comparison as ChatMessage['comparison'],
+                analysisCostUSD: scoreResult?.analysisCostUSD,
               });
             }
             
@@ -1082,10 +1086,17 @@ const StudentChat = () => {
                         <p className="text-xs text-muted-foreground uppercase tracking-wider">Current Prompt Score</p>
                         <p className="text-xs text-muted-foreground mt-1">Prompt #{userMessages.length}</p>
                       </div>
-                      <Badge variant="outline" className="text-xs">
-                        <Zap className="w-3 h-3 mr-1" />
-                        {latestUserMessage.tokensUsed} tokens
-                      </Badge>
+                      <div className="flex items-center gap-2">
+                        <Badge variant="outline" className="text-xs">
+                          <Zap className="w-3 h-3 mr-1" />
+                          {latestUserMessage.tokensUsed} tokens
+                        </Badge>
+                        {latestUserMessage.analysisCostUSD !== undefined && latestUserMessage.analysisCostUSD > 0 && (
+                          <Badge variant="outline" className="text-xs text-amber-400 border-amber-400/30">
+                            AI Scored: ${latestUserMessage.analysisCostUSD.toFixed(5)}
+                          </Badge>
+                        )}
+                      </div>
                     </div>
                     <div className="flex items-center gap-4">
                       <div className={`text-5xl font-bold ${

@@ -61,6 +61,29 @@ export const getDashboardStats = async (userId: string) => {
   const tokensRemaining = user.tokenQuota - user.tokenUsed;
   const tokenUsagePercent = (user.tokenUsed / user.tokenQuota) * 100;
 
+  // Check low balance alert settings
+  let lowBalanceAlert = null;
+  try {
+    const settings = await prisma.settings.findUnique({
+      where: { id: 'default' },
+      select: { lowBalanceAlert: true, lowBalanceThreshold: true },
+    });
+    
+    if (settings?.lowBalanceAlert) {
+      const remainingPercent = 100 - tokenUsagePercent;
+      if (remainingPercent <= (settings.lowBalanceThreshold || 10)) {
+        lowBalanceAlert = {
+          show: true,
+          threshold: settings.lowBalanceThreshold || 10,
+          remainingPercent: Math.round(remainingPercent * 10) / 10,
+          message: `Your token balance is low (${Math.round(remainingPercent)}% remaining). Consider optimizing your prompts.`,
+        };
+      }
+    }
+  } catch {
+    // Ignore settings fetch errors
+  }
+
   return {
     user: {
       id: user.id,
@@ -80,6 +103,7 @@ export const getDashboardStats = async (userId: string) => {
       used: user.tokenUsed,
       remaining: tokensRemaining,
       usagePercent: Math.round(tokenUsagePercent * 10) / 10,
+      lowBalanceAlert,
     },
     recentActivity,
   };
