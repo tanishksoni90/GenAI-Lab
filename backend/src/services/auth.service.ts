@@ -131,8 +131,15 @@ export const registerStudent = async (input: RegisterInput): Promise<AuthRespons
 export const registerAdmin = async (input: AdminRegisterInput): Promise<AuthResponse> => {
   const { email, password, name, adminCode } = input;
   
-  // Verify admin code (in production, this should be more secure)
-  const validAdminCode = process.env.ADMIN_REGISTRATION_CODE || 'GENAI_ADMIN_2025';
+  // Verify admin code - MUST be set in environment variables
+  // No fallback to prevent security vulnerabilities in production
+  const validAdminCode = process.env.ADMIN_REGISTRATION_CODE;
+  
+  if (!validAdminCode) {
+    console.error('SECURITY ERROR: ADMIN_REGISTRATION_CODE environment variable is not set');
+    throw new UnauthorizedError('Admin registration is not configured. Please contact system administrator.');
+  }
+  
   if (adminCode !== validAdminCode) {
     throw new UnauthorizedError('Invalid admin registration code');
   }
