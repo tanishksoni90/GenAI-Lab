@@ -4,16 +4,36 @@ import path from 'path';
 // Load environment variables
 dotenv.config({ path: path.resolve(__dirname, '../../.env') });
 
+// ==================== SECURITY VALIDATION ====================
+// In production, JWT secrets MUST be set via environment variables
+// Using default/fallback secrets in production is a critical security risk
+const isProduction = process.env.NODE_ENV === 'production';
+
+if (isProduction) {
+  if (!process.env.JWT_SECRET || process.env.JWT_SECRET.includes('change-in-production')) {
+    console.error('FATAL: JWT_SECRET environment variable must be set in production');
+    process.exit(1);
+  }
+  if (!process.env.JWT_REFRESH_SECRET || process.env.JWT_REFRESH_SECRET.includes('change-in-production')) {
+    console.error('FATAL: JWT_REFRESH_SECRET environment variable must be set in production');
+    process.exit(1);
+  }
+}
+
+// Development fallbacks - ONLY for local development convenience
+const devJwtSecret = 'dev-only-secret-do-not-use-in-production-' + Date.now();
+const devRefreshSecret = 'dev-only-refresh-do-not-use-in-production-' + Date.now();
+
 export const config = {
   // Server
   port: parseInt(process.env.PORT || '3001', 10),
   nodeEnv: process.env.NODE_ENV || 'development',
   isDev: process.env.NODE_ENV !== 'production',
   
-  // JWT
+  // JWT - No predictable fallbacks in production
   jwt: {
-    secret: process.env.JWT_SECRET || 'dev-secret-change-in-production',
-    refreshSecret: process.env.JWT_REFRESH_SECRET || 'dev-refresh-secret-change-in-production',
+    secret: process.env.JWT_SECRET || (isProduction ? '' : devJwtSecret),
+    refreshSecret: process.env.JWT_REFRESH_SECRET || (isProduction ? '' : devRefreshSecret),
     expiresIn: process.env.JWT_EXPIRES_IN || '1h',
     refreshExpiresIn: process.env.JWT_REFRESH_EXPIRES_IN || '7d',
   },

@@ -35,47 +35,52 @@ export const createAgent = async (userId: string, input: CreateAgentInput) => {
     throw new NotFoundError('AI Model not found');
   }
 
-  // Create agent
-  const agent = await prisma.agent.create({
-    data: {
-      userId,
-      name,
-      description,
-      modelId,
-      behaviorPrompt,
-      strictMode: strictMode || false,
-      knowledgeBase: knowledgeBase ? JSON.stringify(knowledgeBase) : null,
-    },
-    include: {
-      model: {
-        select: { id: true, name: true, provider: true, category: true },
+  // Use transaction for atomic multi-table creation
+  const result = await prisma.$transaction(async (tx) => {
+    // Create agent
+    const agent = await tx.agent.create({
+      data: {
+        userId,
+        name,
+        description,
+        modelId,
+        behaviorPrompt,
+        strictMode: strictMode || false,
+        knowledgeBase: knowledgeBase ? JSON.stringify(knowledgeBase) : null,
       },
-    },
-  });
-
-  // Add guardrails if provided
-  if (guardrailIds && guardrailIds.length > 0) {
-    await prisma.agentGuardrail.createMany({
-      data: guardrailIds.map(guardrailId => ({
-        agentId: agent.id,
-        guardrailId,
-      })),
+      include: {
+        model: {
+          select: { id: true, name: true, provider: true, category: true },
+        },
+      },
     });
-  }
 
-  // Log activity
-  await prisma.activityLog.create({
-    data: {
-      userId,
-      action: 'agent_create',
-      details: JSON.stringify({ agentId: agent.id, name }),
-    },
+    // Add guardrails if provided
+    if (guardrailIds && guardrailIds.length > 0) {
+      await tx.agentGuardrail.createMany({
+        data: guardrailIds.map(guardrailId => ({
+          agentId: agent.id,
+          guardrailId,
+        })),
+      });
+    }
+
+    // Log activity
+    await tx.activityLog.create({
+      data: {
+        userId,
+        action: 'agent_create',
+        details: JSON.stringify({ agentId: agent.id, name }),
+      },
+    });
+
+    return agent;
   });
 
   return {
-    ...agent,
-    knowledgeBase: agent.knowledgeBase ? JSON.parse(agent.knowledgeBase) : [],
-    status: agent.isActive ? 'active' : 'inactive',
+    ...result,
+    knowledgeBase: result.knowledgeBase ? JSON.parse(result.knowledgeBase) : [],
+    status: result.isActive ? 'active' : 'inactive',
   };
 };
 
@@ -155,38 +160,43 @@ export const updateAgent = async (
 
   const { guardrailIds, knowledgeBase, status, ...updateData } = input;
 
-  // Update agent
-  const updatedAgent = await prisma.agent.update({
-    where: { id: agentId },
-    data: {
-      ...updateData,
-      knowledgeBase: knowledgeBase ? JSON.stringify(knowledgeBase) : undefined,
-      isActive: status ? status === 'active' : undefined,
-    },
-    include: {
-      model: {
-        select: { id: true, name: true, provider: true, category: true },
+  // Use transaction for atomic multi-table update
+  const updatedAgent = await prisma.$transaction(async (tx) => {
+    // Update agent
+    const result = await tx.agent.update({
+      where: { id: agentId },
+      data: {
+        ...updateData,
+        knowledgeBase: knowledgeBase ? JSON.stringify(knowledgeBase) : undefined,
+        isActive: status ? status === 'active' : undefined,
       },
-    },
-  });
-
-  // Update guardrails if provided
-  if (guardrailIds !== undefined) {
-    // Remove existing guardrails
-    await prisma.agentGuardrail.deleteMany({
-      where: { agentId },
+      include: {
+        model: {
+          select: { id: true, name: true, provider: true, category: true },
+        },
+      },
     });
 
-    // Add new guardrails
-    if (guardrailIds.length > 0) {
-      await prisma.agentGuardrail.createMany({
-        data: guardrailIds.map(guardrailId => ({
-          agentId,
-          guardrailId,
-        })),
+    // Update guardrails if provided
+    if (guardrailIds !== undefined) {
+      // Remove existing guardrails
+      await tx.agentGuardrail.deleteMany({
+        where: { agentId },
       });
+
+      // Add new guardrails
+      if (guardrailIds.length > 0) {
+        await tx.agentGuardrail.createMany({
+          data: guardrailIds.map(guardrailId => ({
+            agentId,
+            guardrailId,
+          })),
+        });
+      }
     }
-  }
+
+    return result;
+  });
 
   return {
     ...updatedAgent,

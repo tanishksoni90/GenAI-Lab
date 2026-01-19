@@ -269,7 +269,24 @@ Respond with ONLY a valid JSON object in this exact format, no markdown code blo
       analysisSource: 'gemini',
     };
   } catch (error: any) {
-    console.error('Gemini analysis failed:', error.message);
+    // Log the error but DON'T silently return null
+    // This was causing grades to silently fail
+    console.error('[Gemini Analysis] Analysis failed:', error.message);
+    
+    // For rate limiting or quota errors, we should fallback to rule-based
+    if (error.message?.includes('429') || error.message?.includes('quota') || error.message?.includes('rate')) {
+      console.warn('[Gemini Analysis] Rate limited, falling back to rule-based scoring');
+      return null; // Allow fallback for rate limiting
+    }
+    
+    // For API key issues, also fallback gracefully
+    if (error.message?.includes('API key') || error.message?.includes('authentication')) {
+      console.warn('[Gemini Analysis] API key issue, falling back to rule-based scoring');
+      return null;
+    }
+    
+    // For other errors, still fallback but log as warning
+    console.warn('[Gemini Analysis] Unexpected error, falling back to rule-based scoring');
     return null;
   }
 }

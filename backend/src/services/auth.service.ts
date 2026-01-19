@@ -86,25 +86,39 @@ export const registerStudent = async (input: RegisterInput): Promise<AuthRespons
   // Hash password
   const hashedPassword = await hashPassword(password);
   
-  // Create user
-  const user = await prisma.user.create({
-    data: {
-      email,
-      password: hashedPassword,
-      name,
-      registrationId,
-      role: 'student',
-      tokenQuota: config.defaultTokenQuota,
-    },
-    select: {
-      id: true,
-      email: true,
-      name: true,
-      role: true,
-      registrationId: true,
-      tokenQuota: true,
-      tokenUsed: true,
-    },
+  // Use transaction for atomic user creation + activity log
+  const user = await prisma.$transaction(async (tx) => {
+    // Create user
+    const newUser = await tx.user.create({
+      data: {
+        email,
+        password: hashedPassword,
+        name,
+        registrationId,
+        role: 'student',
+        tokenQuota: config.defaultTokenQuota,
+      },
+      select: {
+        id: true,
+        email: true,
+        name: true,
+        role: true,
+        registrationId: true,
+        tokenQuota: true,
+        tokenUsed: true,
+      },
+    });
+    
+    // Log activity
+    await tx.activityLog.create({
+      data: {
+        userId: newUser.id,
+        action: 'register',
+        details: JSON.stringify({ method: 'student_registration' }),
+      },
+    });
+    
+    return newUser;
   });
   
   // Generate tokens
@@ -113,15 +127,6 @@ export const registerStudent = async (input: RegisterInput): Promise<AuthRespons
     email: user.email,
     role: user.role,
     name: user.name,
-  });
-  
-  // Log activity
-  await prisma.activityLog.create({
-    data: {
-      userId: user.id,
-      action: 'register',
-      details: JSON.stringify({ method: 'student_registration' }),
-    },
   });
   
   return { user, tokens };
@@ -153,25 +158,39 @@ export const registerAdmin = async (input: AdminRegisterInput): Promise<AuthResp
   // Hash password
   const hashedPassword = await hashPassword(password);
   
-  // Create admin user
-  const user = await prisma.user.create({
-    data: {
-      email,
-      password: hashedPassword,
-      name,
-      role: 'admin',
-      isVerified: true, // Admins are auto-verified
-      tokenQuota: 0, // Admins don't need token quota
-    },
-    select: {
-      id: true,
-      email: true,
-      name: true,
-      role: true,
-      registrationId: true,
-      tokenQuota: true,
-      tokenUsed: true,
-    },
+  // Use transaction for atomic user creation + activity log
+  const user = await prisma.$transaction(async (tx) => {
+    // Create admin user
+    const newUser = await tx.user.create({
+      data: {
+        email,
+        password: hashedPassword,
+        name,
+        role: 'admin',
+        isVerified: true, // Admins are auto-verified
+        tokenQuota: 0, // Admins don't need token quota
+      },
+      select: {
+        id: true,
+        email: true,
+        name: true,
+        role: true,
+        registrationId: true,
+        tokenQuota: true,
+        tokenUsed: true,
+      },
+    });
+    
+    // Log activity
+    await tx.activityLog.create({
+      data: {
+        userId: newUser.id,
+        action: 'register',
+        details: JSON.stringify({ method: 'admin_registration' }),
+      },
+    });
+    
+    return newUser;
   });
   
   // Generate tokens
@@ -180,15 +199,6 @@ export const registerAdmin = async (input: AdminRegisterInput): Promise<AuthResp
     email: user.email,
     role: user.role,
     name: user.name,
-  });
-  
-  // Log activity
-  await prisma.activityLog.create({
-    data: {
-      userId: user.id,
-      action: 'register',
-      details: JSON.stringify({ method: 'admin_registration' }),
-    },
   });
   
   return { user, tokens };

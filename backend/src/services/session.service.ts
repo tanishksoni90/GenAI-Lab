@@ -1,5 +1,6 @@
 import { prisma } from '../lib/prisma';
 import { NotFoundError, InsufficientTokensError, ForbiddenError } from '../utils/errors';
+import { sanitizeMessageContent } from '../utils/sanitize';
 import * as aiService from './ai.service';
 import * as scoringService from './scoring.service';
 import { StreamCallback } from './ai.service';
@@ -50,31 +51,36 @@ export const createSession = async (
     throw new InsufficientTokensError();
   }
 
-  // Create session
-  const session = await prisma.session.create({
-    data: {
-      userId,
-      modelId,
-      agentId,
-      title: `${model.name} Session`,
-    },
-    include: {
-      model: {
-        select: { id: true, name: true, provider: true, category: true },
+  // Use transaction for atomic session creation + activity log
+  const session = await prisma.$transaction(async (tx) => {
+    // Create session
+    const newSession = await tx.session.create({
+      data: {
+        userId,
+        modelId,
+        agentId,
+        title: `${model.name} Session`,
       },
-      agent: {
-        select: { id: true, name: true, behaviorPrompt: true },
+      include: {
+        model: {
+          select: { id: true, name: true, provider: true, category: true },
+        },
+        agent: {
+          select: { id: true, name: true, behaviorPrompt: true },
+        },
       },
-    },
-  });
+    });
 
-  // Log activity
-  await prisma.activityLog.create({
-    data: {
-      userId,
-      action: 'session_start',
-      details: JSON.stringify({ sessionId: session.id, modelId, agentId }),
-    },
+    // Log activity
+    await tx.activityLog.create({
+      data: {
+        userId,
+        action: 'session_start',
+        details: JSON.stringify({ sessionId: newSession.id, modelId, agentId }),
+      },
+    });
+
+    return newSession;
   });
 
   return session;
@@ -155,6 +161,9 @@ export const sendMessage = async (
   userId: string,
   content: string
 ) => {
+  // Sanitize user input to prevent XSS
+  const sanitizedContent = sanitizeMessageContent(content);
+  
   // Get session with messages
   const session = await prisma.session.findUnique({
     where: { id: sessionId },
@@ -188,12 +197,12 @@ export const sendMessage = async (
   }));
 
   // Score the user's prompt using Gemini AI (cost deducted from budget, not shown in session)
-  const scoreResult = await scoringService.scorePrompt(content, conversationHistory, userId);
+  const scoreResult = await scoringService.scorePrompt(sanitizedContent, conversationHistory, userId);
 
   // Get AI response
   const aiResponse = await aiService.chatWithModel(
     session.modelId,
-    content,
+    sanitizedContent,
     conversationHistory
   );
 
@@ -252,7 +261,7 @@ export const sendMessage = async (
       data: {
         sessionId,
         role: 'user',
-        content,
+        content: sanitizedContent,
         score: scoreResult.totalScore,
         feedback: JSON.stringify(scoreResult),
         inputTokens: inputTokens,
@@ -413,6 +422,9 @@ export const sendMessageStreaming = async (
   cost: number;
   isMock: boolean;
 }> => {
+  // Sanitize user input to prevent XSS
+  const sanitizedContent = sanitizeMessageContent(content);
+  
   // Get session with messages
   const session = await prisma.session.findUnique({
     where: { id: sessionId },
@@ -446,13 +458,13 @@ export const sendMessageStreaming = async (
   }));
 
   // Score the user's prompt using Gemini AI
-  const scoreResult = await scoringService.scorePrompt(content, conversationHistory, userId);
+  const scoreResult = await scoringService.scorePrompt(sanitizedContent, conversationHistory, userId);
 
   // Stream AI response first to get actual token counts
   let fullResponse = '';
   const streamResult = await aiService.streamWithModel(
     session.modelId,
-    content,
+    sanitizedContent,
     conversationHistory,
     (chunk: string, done: boolean) => {
       if (!done) {
@@ -515,7 +527,7 @@ export const sendMessageStreaming = async (
       data: {
         sessionId,
         role: 'user',
-        content,
+        content: sanitizedContent,
         score: scoreResult.totalScore,
         feedback: JSON.stringify(scoreResult),
         inputTokens: inputTokens,
