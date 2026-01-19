@@ -158,31 +158,10 @@ const StudentSignIn = () => {
               </Button>
             </form>
 
-            {/* Info about registration */}
+            {/* Info about invite-only access */}
             <div className="p-3 rounded-lg bg-cyan-500/10 border border-cyan-500/20 text-cyan-400 text-xs">
-              <p className="font-semibold mb-1">Don't have an account?</p>
-              <p>You need to sign up first to access the platform.</p>
-            </div>
-
-            <div className="relative">
-              <div className="absolute inset-0 flex items-center">
-                <div className="w-full border-t border-white/10"></div>
-              </div>
-              <div className="relative flex justify-center text-xs uppercase">
-                <span className="bg-card px-2 text-muted-foreground">or</span>
-              </div>
-            </div>
-
-            <div className="text-center">
-              <Button 
-                variant="link" 
-                onClick={() => navigate("/student/signup")} 
-                className="text-cyan-400 font-semibold hover:text-cyan-300 group"
-                disabled={isLoading}
-              >
-                Don't have an account? Sign up
-                <Sparkles className="w-4 h-4 ml-2 group-hover:rotate-12 transition-transform" />
-              </Button>
+              <p className="font-semibold mb-1">New Student?</p>
+              <p>If you haven't set up your account yet, check your email for an invite link from your institution.</p>
             </div>
           </CardContent>
         </Card>

@@ -17,6 +17,9 @@ export type AdminAction =
   | 'admin_reset_password'
   | 'admin_bulk_operation'
   | 'admin_import_students'
+  // Invite Management
+  | 'admin_generate_invite'
+  | 'admin_bulk_generate_invites'
   // Budget/Token Management
   | 'admin_update_budget'
   | 'admin_update_token_quota'
