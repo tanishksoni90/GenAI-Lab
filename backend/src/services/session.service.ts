@@ -204,91 +204,116 @@ export const sendMessage = async (
   const totalTokens = inputTokens + outputTokens;
   const costUSD = calculateModelCostUSD(session.model.modelId, inputTokens, outputTokens);
 
-  // Create user message with input tokens and cost
+  // Calculate message costs
   const userInputCost = calculateModelCostUSD(session.model.modelId, inputTokens, 0);
-  const userMessage = await prisma.message.create({
-    data: {
-      sessionId,
-      role: 'user',
-      content,
-      score: scoreResult.totalScore,
-      feedback: JSON.stringify(scoreResult),
-      inputTokens: inputTokens,
-      outputTokens: 0,
-      tokens: inputTokens, // Legacy field
-      cost: userInputCost,
-    },
-  });
-
-  // Create assistant message with output tokens and cost
   const assistantOutputCost = calculateModelCostUSD(session.model.modelId, 0, outputTokens);
-  const assistantMessage = await prisma.message.create({
-    data: {
-      sessionId,
-      role: 'assistant',
-      content: aiResponse.response,
-      inputTokens: 0,
-      outputTokens: outputTokens,
-      tokens: outputTokens, // Legacy field
-      cost: assistantOutputCost,
-    },
-  });
 
-  // Update session stats with separate input/output tracking
+  // Calculate average score for session update
   const allScores = [...session.messages.filter(m => m.score).map(m => m.score!), scoreResult.totalScore];
   const avgScore = scoringService.calculateSessionScore(allScores);
 
-  await prisma.session.update({
-    where: { id: sessionId },
-    data: {
-      promptCount: { increment: 1 },
-      totalScore: { increment: scoreResult.totalScore },
-      avgScore,
-      inputTokens: { increment: inputTokens },
-      outputTokens: { increment: outputTokens },
-      tokensUsed: { increment: totalTokens }, // Legacy field
-      totalCost: { increment: costUSD },
-      updatedAt: new Date(),
-    },
-  });
-
-  // Deduct tokens from user (cap at quota if hard limit is enabled)
-  const currentUser = await prisma.user.findUnique({
-    where: { id: userId },
-    select: { tokenQuota: true, tokenUsed: true, budgetLimit: true, budgetUsed: true },
-  });
-  
+  // Get hard limit setting once (outside transaction for read)
   const hardLimitEnabled = await isHardLimitEnforced();
-  
+
   // Convert USD cost to virtual tokens for consistent quota tracking
   // Formula: Virtual Tokens = (USD Spent / Budget Limit USD) × Display Tokens
-  let virtualTokensToAdd = pricingUtils.usdToVirtualTokens(costUSD);
-  
-  // If hard limit is enabled, cap the virtual token usage at the quota
-  if (hardLimitEnabled && currentUser) {
-    const remainingQuota = Math.max(0, currentUser.tokenQuota - currentUser.tokenUsed);
-    virtualTokensToAdd = Math.min(virtualTokensToAdd, remainingQuota);
-  }
+  const virtualTokensToAdd = pricingUtils.usdToVirtualTokens(costUSD);
 
-  // Update user's budget (cost in USD) and virtual tokens
-  await prisma.user.update({
-    where: { id: userId },
-    data: {
-      tokenUsed: { increment: virtualTokensToAdd },
-      budgetUsed: { increment: costUSD },
-    },
-  });
+  // ============================================================
+  // ATOMIC TRANSACTION: All database writes in a single transaction
+  // This prevents race conditions where concurrent requests could
+  // both pass budget checks and cause overspending
+  // ============================================================
+  const result = await prisma.$transaction(async (tx) => {
+    // Re-fetch user within transaction to ensure we have latest data
+    const currentUser = await tx.user.findUnique({
+      where: { id: userId },
+      select: { tokenQuota: true, tokenUsed: true, budgetLimit: true, budgetUsed: true },
+    });
 
-  // Update agent stats if applicable (use real tokens for agent stats)
-  if (session.agentId) {
-    await prisma.agent.update({
-      where: { id: session.agentId },
+    if (!currentUser) {
+      throw new NotFoundError('User not found');
+    }
+
+    // Double-check budget availability within transaction (prevents race condition)
+    if (hardLimitEnabled && currentUser.tokenUsed >= currentUser.tokenQuota) {
+      throw new InsufficientTokensError();
+    }
+
+    // Cap virtual tokens at remaining quota if hard limit enabled
+    let cappedVirtualTokens = virtualTokensToAdd;
+    if (hardLimitEnabled) {
+      const remainingQuota = Math.max(0, currentUser.tokenQuota - currentUser.tokenUsed);
+      cappedVirtualTokens = Math.min(virtualTokensToAdd, remainingQuota);
+    }
+
+    // Create user message
+    const userMessage = await tx.message.create({
       data: {
-        messagesCount: { increment: 2 }, // user + assistant
-        tokensUsed: { increment: aiResponse.tokensUsed },
+        sessionId,
+        role: 'user',
+        content,
+        score: scoreResult.totalScore,
+        feedback: JSON.stringify(scoreResult),
+        inputTokens: inputTokens,
+        outputTokens: 0,
+        tokens: inputTokens, // Legacy field
+        cost: userInputCost,
       },
     });
-  }
+
+    // Create assistant message
+    const assistantMessage = await tx.message.create({
+      data: {
+        sessionId,
+        role: 'assistant',
+        content: aiResponse.response,
+        inputTokens: 0,
+        outputTokens: outputTokens,
+        tokens: outputTokens, // Legacy field
+        cost: assistantOutputCost,
+      },
+    });
+
+    // Update session stats
+    await tx.session.update({
+      where: { id: sessionId },
+      data: {
+        promptCount: { increment: 1 },
+        totalScore: { increment: scoreResult.totalScore },
+        avgScore,
+        inputTokens: { increment: inputTokens },
+        outputTokens: { increment: outputTokens },
+        tokensUsed: { increment: totalTokens }, // Legacy field
+        totalCost: { increment: costUSD },
+        updatedAt: new Date(),
+      },
+    });
+
+    // Update user's budget (cost in USD) and virtual tokens - ATOMIC
+    await tx.user.update({
+      where: { id: userId },
+      data: {
+        tokenUsed: { increment: cappedVirtualTokens },
+        budgetUsed: { increment: costUSD },
+      },
+    });
+
+    // Update agent stats if applicable
+    if (session.agentId) {
+      await tx.agent.update({
+        where: { id: session.agentId },
+        data: {
+          messagesCount: { increment: 2 }, // user + assistant
+          tokensUsed: { increment: aiResponse.tokensUsed },
+        },
+      });
+    }
+
+    return { userMessage, assistantMessage, cappedVirtualTokens };
+  });
+
+  const { userMessage, assistantMessage } = result;
 
   return {
     userMessage: {
@@ -443,78 +468,104 @@ export const sendMessageStreaming = async (
   const totalTokens = inputTokens + outputTokens;
   const costUSD = calculateModelCostUSD(session.model.modelId, inputTokens, outputTokens);
 
-  // Create user message with input tokens and cost
+  // Calculate message costs
   const userInputCost = calculateModelCostUSD(session.model.modelId, inputTokens, 0);
-  const userMessage = await prisma.message.create({
-    data: {
-      sessionId,
-      role: 'user',
-      content,
-      score: scoreResult.totalScore,
-      feedback: JSON.stringify(scoreResult),
-      inputTokens: inputTokens,
-      outputTokens: 0,
-      tokens: inputTokens, // Legacy
-      cost: userInputCost,
-    },
-  });
-
-  // Create assistant message with output tokens and cost
   const assistantOutputCost = calculateModelCostUSD(session.model.modelId, 0, outputTokens);
-  const assistantMessage = await prisma.message.create({
-    data: {
-      sessionId,
-      role: 'assistant',
-      content: fullResponse,
-      inputTokens: 0,
-      outputTokens: outputTokens,
-      tokens: outputTokens, // Legacy
-      cost: assistantOutputCost,
-    },
-  });
 
-  // Update session stats with separate input/output tracking
+  // Calculate average score for session update
   const allScores = [...session.messages.filter(m => m.score).map(m => m.score!), scoreResult.totalScore];
   const avgScore = scoringService.calculateSessionScore(allScores);
 
-  await prisma.session.update({
-    where: { id: sessionId },
-    data: {
-      promptCount: { increment: 1 },
-      totalScore: { increment: scoreResult.totalScore },
-      avgScore,
-      inputTokens: { increment: inputTokens },
-      outputTokens: { increment: outputTokens },
-      tokensUsed: { increment: totalTokens }, // Legacy
-      totalCost: { increment: costUSD },
-      updatedAt: new Date(),
-    },
-  });
-
-  // Update user token usage
-  const currentUser = await prisma.user.findUnique({
-    where: { id: userId },
-    select: { tokenQuota: true, tokenUsed: true, budgetLimit: true, budgetUsed: true },
-  });
-  
+  // Get hard limit setting once (outside transaction for read)
   const hardLimitEnabled = await isHardLimitEnforced();
-  
-  // Convert USD cost to virtual tokens for consistent quota tracking
-  let virtualTokensToAdd = pricingUtils.usdToVirtualTokens(costUSD);
-  
-  if (hardLimitEnabled && currentUser) {
-    const remainingQuota = Math.max(0, currentUser.tokenQuota - currentUser.tokenUsed);
-    virtualTokensToAdd = Math.min(virtualTokensToAdd, remainingQuota);
-  }
 
-  // Update user's budget (cost in USD) and virtual tokens
-  await prisma.user.update({
-    where: { id: userId },
-    data: {
-      tokenUsed: { increment: virtualTokensToAdd },
-      budgetUsed: { increment: costUSD },
-    },
+  // Convert USD cost to virtual tokens for consistent quota tracking
+  const virtualTokensToAdd = pricingUtils.usdToVirtualTokens(costUSD);
+
+  // ============================================================
+  // ATOMIC TRANSACTION: All database writes in a single transaction
+  // This prevents race conditions where concurrent requests could
+  // both pass budget checks and cause overspending
+  // ============================================================
+  const result = await prisma.$transaction(async (tx) => {
+    // Re-fetch user within transaction to ensure we have latest data
+    const currentUser = await tx.user.findUnique({
+      where: { id: userId },
+      select: { tokenQuota: true, tokenUsed: true, budgetLimit: true, budgetUsed: true },
+    });
+
+    if (!currentUser) {
+      throw new NotFoundError('User not found');
+    }
+
+    // Double-check budget availability within transaction (prevents race condition)
+    if (hardLimitEnabled && currentUser.tokenUsed >= currentUser.tokenQuota) {
+      throw new InsufficientTokensError();
+    }
+
+    // Cap virtual tokens at remaining quota if hard limit enabled
+    let cappedVirtualTokens = virtualTokensToAdd;
+    if (hardLimitEnabled) {
+      const remainingQuota = Math.max(0, currentUser.tokenQuota - currentUser.tokenUsed);
+      cappedVirtualTokens = Math.min(virtualTokensToAdd, remainingQuota);
+    }
+
+    // Create user message
+    const userMessage = await tx.message.create({
+      data: {
+        sessionId,
+        role: 'user',
+        content,
+        score: scoreResult.totalScore,
+        feedback: JSON.stringify(scoreResult),
+        inputTokens: inputTokens,
+        outputTokens: 0,
+        tokens: inputTokens, // Legacy
+        cost: userInputCost,
+      },
+    });
+
+    // Create assistant message
+    const assistantMessage = await tx.message.create({
+      data: {
+        sessionId,
+        role: 'assistant',
+        content: fullResponse,
+        inputTokens: 0,
+        outputTokens: outputTokens,
+        tokens: outputTokens, // Legacy
+        cost: assistantOutputCost,
+      },
+    });
+
+    // Update session stats
+    await tx.session.update({
+      where: { id: sessionId },
+      data: {
+        promptCount: { increment: 1 },
+        totalScore: { increment: scoreResult.totalScore },
+        avgScore,
+        inputTokens: { increment: inputTokens },
+        outputTokens: { increment: outputTokens },
+        tokensUsed: { increment: totalTokens }, // Legacy
+        totalCost: { increment: costUSD },
+        updatedAt: new Date(),
+      },
+    });
+
+    // Update user's budget (cost in USD) and virtual tokens - ATOMIC
+    await tx.user.update({
+      where: { id: userId },
+      data: {
+        tokenUsed: { increment: cappedVirtualTokens },
+        budgetUsed: { increment: costUSD },
+      },
+    });
+
+    return { userMessage, assistantMessage };
   });
+
+  const { userMessage, assistantMessage } = result;
 
   return {
     userMessage: {
