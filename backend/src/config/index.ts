@@ -5,19 +5,49 @@ import path from 'path';
 dotenv.config({ path: path.resolve(__dirname, '../../.env') });
 
 // ==================== SECURITY VALIDATION ====================
-// In production, JWT secrets MUST be set via environment variables
-// Using default/fallback secrets in production is a critical security risk
+// In production, critical environment variables MUST be properly configured
 const isProduction = process.env.NODE_ENV === 'production';
 
+// Required environment variables for production
+const requiredEnvVars: { name: string; validator?: (value: string) => boolean }[] = [
+  { 
+    name: 'JWT_SECRET', 
+    validator: (v) => v.length >= 32 && !v.includes('change-in-production') 
+  },
+  { 
+    name: 'JWT_REFRESH_SECRET', 
+    validator: (v) => v.length >= 32 && !v.includes('change-in-production') 
+  },
+  { 
+    name: 'DATABASE_URL',
+    validator: (v) => !v.includes('dev.db') // SQLite dev.db not for production
+  },
+  { 
+    name: 'ENCRYPTION_KEY',
+    validator: (v) => v.length === 64 // 32-byte key in hex = 64 chars
+  },
+];
+
 if (isProduction) {
-  if (!process.env.JWT_SECRET || process.env.JWT_SECRET.includes('change-in-production')) {
-    console.error('FATAL: JWT_SECRET environment variable must be set in production');
+  const missingOrInvalid: string[] = [];
+  
+  for (const { name, validator } of requiredEnvVars) {
+    const value = process.env[name];
+    if (!value) {
+      missingOrInvalid.push(`${name} is missing`);
+    } else if (validator && !validator(value)) {
+      missingOrInvalid.push(`${name} is invalid or insecure`);
+    }
+  }
+  
+  if (missingOrInvalid.length > 0) {
+    console.error('FATAL: Environment validation failed:');
+    missingOrInvalid.forEach(msg => console.error(`  - ${msg}`));
+    console.error('\nPlease configure all required environment variables for production.');
     process.exit(1);
   }
-  if (!process.env.JWT_REFRESH_SECRET || process.env.JWT_REFRESH_SECRET.includes('change-in-production')) {
-    console.error('FATAL: JWT_REFRESH_SECRET environment variable must be set in production');
-    process.exit(1);
-  }
+  
+  console.log('✓ Environment validation passed');
 }
 
 // Development fallbacks - ONLY for local development convenience
