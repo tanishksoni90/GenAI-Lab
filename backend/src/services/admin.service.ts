@@ -5,6 +5,7 @@ import crypto from 'crypto';
 import { config } from '../config';
 import { clearApiKeyCache } from './ai.service';
 import { getModelPricing, pricingUtils, PRICING_CONFIG } from '../config/pricing';
+import { encrypt, decrypt, maskSensitiveValue } from '../utils/encryption';
 
 // ==================== HELPER FUNCTIONS ====================
 
@@ -946,18 +947,23 @@ export const getAPIKeys = async () => {
     ...keys.map(k => k.provider.toLowerCase())
   ]);
   
-  // Return all providers
+  // Return all providers with masked keys
   return Array.from(allProviders).map(provider => {
     const key = keyMap.get(provider);
     const isDefault = defaultProviders.includes(provider);
     
     if (key) {
+      // Decrypt the API key to check if it exists, then mask it for display
+      const decryptedKey = key.apiKey ? decrypt(key.apiKey) : null;
+      const hasValidKey = decryptedKey && decryptedKey.length > 0;
+      
       return {
         id: key.id,
         provider: key.provider,
-        apiKey: key.apiKey && key.apiKey.length > 0 ? `${key.apiKey.slice(0, 8)}...${key.apiKey.slice(-4)}` : null,
+        // Show masked version of decrypted key
+        apiKey: hasValidKey ? maskSensitiveValue(decryptedKey) : null,
         baseUrl: key.baseUrl,
-        isActive: key.isActive && key.apiKey && key.apiKey.length > 0,
+        isActive: key.isActive && hasValidKey,
         isDefault,
         updatedAt: key.updatedAt,
       };
@@ -983,15 +989,18 @@ export const updateAPIKey = async (
 ) => {
   const existing = await prisma.aPIKey.findUnique({ where: { provider } });
 
+  // Encrypt the API key before storing
+  const encryptedApiKey = encrypt(apiKey);
+
   let result;
   if (existing) {
     result = await prisma.aPIKey.update({
       where: { provider },
-      data: { apiKey, baseUrl, isActive: true },
+      data: { apiKey: encryptedApiKey, baseUrl, isActive: true },
     });
   } else {
     result = await prisma.aPIKey.create({
-      data: { provider, apiKey, baseUrl },
+      data: { provider, apiKey: encryptedApiKey, baseUrl },
     });
   }
   

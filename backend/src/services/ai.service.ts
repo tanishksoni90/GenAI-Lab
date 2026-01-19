@@ -1,6 +1,7 @@
 import { prisma } from '../lib/prisma';
 import { config } from '../config';
 import { NotFoundError, BadRequestError } from '../utils/errors';
+import { decrypt } from '../utils/encryption';
 import OpenAI from 'openai';
 import Anthropic from '@anthropic-ai/sdk';
 import { GoogleGenerativeAI } from '@google/generative-ai';
@@ -34,12 +35,15 @@ const getApiKeyFromDB = async (provider: string): Promise<{ apiKey: string; base
   });
   
   if (key && key.apiKey && key.isActive) {
+    // Decrypt the API key before using it
+    const decryptedApiKey = decrypt(key.apiKey);
+    
     apiKeyCache.set(cacheKey, {
-      apiKey: key.apiKey,
+      apiKey: decryptedApiKey,
       baseUrl: key.baseUrl,
       cachedAt: Date.now(),
     });
-    return { apiKey: key.apiKey, baseUrl: key.baseUrl };
+    return { apiKey: decryptedApiKey, baseUrl: key.baseUrl };
   }
   
   // Clear cache if key not found or inactive
