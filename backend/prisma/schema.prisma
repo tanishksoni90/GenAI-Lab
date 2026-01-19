@@ -23,6 +23,10 @@ model User {
   // Password management
   mustChangePassword Boolean @default(false) // Force password change on next login
   
+  // Account lockout (security)
+  failedLoginAttempts Int      @default(0)
+  lockedUntil         DateTime?
+  
   // Student specific
   courseId      String?
   course        Course?   @relation(fields: [courseId], references: [id])

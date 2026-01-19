@@ -208,6 +208,10 @@ export const registerAdmin = async (input: AdminRegisterInput): Promise<AuthResp
 export const login = async (input: LoginInput): Promise<AuthResponse> => {
   const { email, password } = input;
   
+  // Account lockout configuration
+  const MAX_FAILED_ATTEMPTS = 5;
+  const LOCKOUT_DURATION_MINUTES = 15;
+  
   // Find user
   const user = await prisma.user.findUnique({
     where: { email },
@@ -222,11 +226,21 @@ export const login = async (input: LoginInput): Promise<AuthResponse> => {
       tokenUsed: true,
       isActive: true,
       mustChangePassword: true,
+      failedLoginAttempts: true,
+      lockedUntil: true,
     },
   });
   
   if (!user) {
     throw new UnauthorizedError('Invalid email or password');
+  }
+  
+  // Check if account is locked
+  if (user.lockedUntil && user.lockedUntil > new Date()) {
+    const minutesRemaining = Math.ceil((user.lockedUntil.getTime() - Date.now()) / 60000);
+    throw new UnauthorizedError(
+      `Account is locked due to too many failed login attempts. Please try again in ${minutesRemaining} minute(s).`
+    );
   }
   
   if (!user.isActive) {
@@ -236,13 +250,40 @@ export const login = async (input: LoginInput): Promise<AuthResponse> => {
   // Verify password
   const isValidPassword = await comparePassword(password, user.password);
   if (!isValidPassword) {
-    throw new UnauthorizedError('Invalid email or password');
+    // Increment failed login attempts
+    const newFailedAttempts = (user.failedLoginAttempts || 0) + 1;
+    const shouldLock = newFailedAttempts >= MAX_FAILED_ATTEMPTS;
+    
+    await prisma.user.update({
+      where: { id: user.id },
+      data: {
+        failedLoginAttempts: newFailedAttempts,
+        lockedUntil: shouldLock 
+          ? new Date(Date.now() + LOCKOUT_DURATION_MINUTES * 60 * 1000)
+          : null,
+      },
+    });
+    
+    if (shouldLock) {
+      throw new UnauthorizedError(
+        `Account locked for ${LOCKOUT_DURATION_MINUTES} minutes due to too many failed login attempts.`
+      );
+    }
+    
+    const attemptsRemaining = MAX_FAILED_ATTEMPTS - newFailedAttempts;
+    throw new UnauthorizedError(
+      `Invalid email or password. ${attemptsRemaining} attempt(s) remaining before account lockout.`
+    );
   }
   
-  // Update last login
+  // Successful login - reset failed attempts
   await prisma.user.update({
     where: { id: user.id },
-    data: { lastLoginAt: new Date() },
+    data: { 
+      lastLoginAt: new Date(),
+      failedLoginAttempts: 0,
+      lockedUntil: null,
+    },
   });
   
   // Generate tokens
@@ -263,7 +304,7 @@ export const login = async (input: LoginInput): Promise<AuthResponse> => {
   });
   
   // Remove password from response, keep mustChangePassword in user object
-  const { password: _, ...userWithoutPassword } = user;
+  const { password: _, failedLoginAttempts: __, lockedUntil: ___, ...userWithoutPassword } = user;
   
   return { 
     user: {
