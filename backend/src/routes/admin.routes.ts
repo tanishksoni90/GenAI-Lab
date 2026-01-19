@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import * as adminController from '../controllers/admin.controller';
+import * as inviteController from '../controllers/invite.controller';
 import { authenticate, requireAdmin } from '../middleware/auth';
 import { validate } from '../middleware/validate';
 import { z } from 'zod';
@@ -135,6 +136,24 @@ router.delete('/students/:id', adminController.deleteStudent);
 router.post('/students/:id/reset-password', adminController.resetStudentPassword);
 router.post('/students/bulk', validate(bulkOperationSchema), adminController.bulkOperation);
 router.post('/students/import', validate(importStudentsSchema), adminController.importStudents);
+
+// ==================== INVITE ROUTES (Magic Link System) ====================
+
+// Generate invite link for a single student
+router.post('/students/:id/invite', inviteController.generateInvite);
+
+// Get invite status for a student
+router.get('/students/:id/invite-status', inviteController.getInviteStatus);
+
+// Resend invite for a student
+router.post('/students/:id/resend-invite', inviteController.resendInvite);
+
+// Bulk generate invites
+router.post('/students/bulk-invite', validate(z.object({
+  body: z.object({
+    registrationIds: z.array(z.string()).min(1, 'At least one registration ID required'),
+  }),
+})), inviteController.bulkGenerateInvites);
 
 // ==================== COURSE ROUTES ====================
 

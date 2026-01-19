@@ -58,12 +58,28 @@ model User {
   artifacts     Artifact[]
   activityLogs  ActivityLog[]
   comparisonSessions ComparisonSession[]
+  inviteToken       InviteToken?
   
   @@index([email])
   @@index([registrationId])
   @@index([courseId])
   @@index([batchId])
   @@index([createdAt])
+}
+
+// ==================== INVITE TOKENS (Magic Link System) ====================
+
+model InviteToken {
+  id          String    @id @default(uuid())
+  token       String    @unique
+  userId      String    @unique
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  expiresAt   DateTime
+  usedAt      DateTime? // When the token was used to set password
+  createdAt   DateTime  @default(now())
+  
+  @@index([token])
+  @@index([expiresAt])
 }
 
 // ==================== COURSES & BATCHES ====================

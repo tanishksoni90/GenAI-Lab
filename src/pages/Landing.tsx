@@ -11,7 +11,7 @@ import {
   MessageSquare, ArrowRight,
   ChevronRight, Star, Target, Rocket,
   CheckCircle2, Bot, Layers, Lock, 
-  Cpu, Wand2, ArrowUpRight
+  Cpu, Wand2, ArrowUpRight, Mail
 } from "lucide-react";
 
 // Animated Counter Component
@@ -222,17 +222,10 @@ const Landing = () => {
           <div className="flex items-center gap-3">
             <SkyToggle checked={isDark} onChange={toggleTheme} />
             <Button 
-              variant="ghost" 
               onClick={() => navigate("/student/signin")} 
-              className="text-muted-foreground hover:text-foreground"
-            >
-              Sign In
-            </Button>
-            <Button 
-              onClick={() => navigate("/student/signup")} 
               className="gradient-primary glow-primary btn-press"
             >
-              Get Started
+              Sign In
               <ArrowRight className="w-4 h-4 ml-2" />
             </Button>
           </div>
@@ -277,17 +270,17 @@ const Landing = () => {
             <div className="flex flex-col sm:flex-row items-center justify-center gap-4 pt-4 animate-slide-up stagger-2">
               <Button 
                 size="lg" 
-                onClick={() => navigate("/student/signup")}
+                onClick={() => navigate("/student/signin")}
                 className="gradient-primary glow-primary btn-press h-14 px-8 text-lg font-semibold group"
               >
                 <Rocket className="w-5 h-5 mr-2 group-hover:rotate-12 transition-transform" />
-                Start Learning Free
+                Student Login
                 <ArrowRight className="w-5 h-5 ml-2 group-hover:translate-x-1 transition-transform" />
               </Button>
               <Button 
                 size="lg" 
                 variant="outline"
-                onClick={() => navigate("/student/signin")}
+                onClick={() => navigate("/admin/signin")}
                 className="glass hover-glow h-14 px-8 text-lg font-medium group"
               >
                 Already have an account? Sign In
@@ -524,9 +517,9 @@ const Landing = () => {
             {[
               {
                 step: "01",
-                title: "Sign Up",
-                description: "Register with your Registration ID provided by your institution",
-                icon: GraduationCap,
+                title: "Get Invited",
+                description: "Receive an invite link from your institution and set up your account",
+                icon: Mail,
                 gradient: "gradient-primary"
               },
               {
@@ -578,19 +571,19 @@ const Landing = () => {
               <div className="flex flex-col sm:flex-row items-center justify-center gap-4 pt-4">
                 <Button 
                   size="lg" 
-                  onClick={() => navigate("/student/signup")}
+                  onClick={() => navigate("/student/signin")}
                   className="gradient-primary glow-primary btn-press h-14 px-10 text-lg font-semibold"
                 >
-                  Start Learning Now
+                  Student Login
                   <ArrowRight className="w-5 h-5 ml-2" />
                 </Button>
                 <Button 
                   size="lg" 
                   variant="outline"
-                  onClick={() => navigate("/student/signin")}
+                  onClick={() => navigate("/admin/signin")}
                   className="glass hover-glow h-14 px-10 text-lg"
                 >
-                  Sign In
+                  Admin Login
                 </Button>
               </div>
             </div>

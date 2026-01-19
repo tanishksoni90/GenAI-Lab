@@ -39,6 +39,15 @@ app.use(helmet({
 app.use(express.json({ limit: '1mb' }));
 app.use(express.urlencoded({ extended: true, limit: '1mb' }));
 
+// Request ID middleware for tracing/debugging
+app.use((req, res, next) => {
+  const requestId = req.headers['x-request-id'] as string || 
+    `${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
+  req.headers['x-request-id'] = requestId;
+  res.setHeader('x-request-id', requestId);
+  next();
+});
+
 // CORS configuration - supports multiple origins
 // Set FRONTEND_URL as comma-separated list: "http://localhost:3000,https://app.example.com"
 const allowedOrigins = config.frontendUrl.split(',').map(origin => origin.trim());
@@ -113,17 +122,29 @@ const aiRateLimiter = rateLimit({
 app.use('/api/sessions', aiRateLimiter);
 app.use('/api/comparison', aiRateLimiter);
 
-// Body parsing middleware
-app.use(express.json({ limit: '10mb' }));
-app.use(express.urlencoded({ extended: true, limit: '10mb' }));
-
-// Health check endpoint
-app.get('/health', (_req, res) => {
-  res.json({ 
-    status: 'ok', 
-    timestamp: new Date().toISOString(),
-    environment: config.nodeEnv,
-  });
+// Health check endpoint (before routes, no auth required)
+app.get('/health', async (_req, res) => {
+  try {
+    // Quick DB connectivity check
+    const { prisma } = await import('./lib/prisma');
+    await prisma.$queryRaw`SELECT 1`;
+    
+    res.json({ 
+      status: 'healthy', 
+      timestamp: new Date().toISOString(),
+      environment: config.nodeEnv,
+      database: 'connected',
+      uptime: process.uptime(),
+    });
+  } catch (error) {
+    res.status(503).json({
+      status: 'unhealthy',
+      timestamp: new Date().toISOString(),
+      environment: config.nodeEnv,
+      database: 'disconnected',
+      error: config.isDev ? String(error) : 'Database connection failed',
+    });
+  }
 });
 
 // API routes
