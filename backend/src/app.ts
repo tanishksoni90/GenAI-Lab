@@ -39,6 +39,50 @@ const limiter = rateLimit({
 });
 app.use('/api', limiter);
 
+// Stricter rate limiting for AI-intensive endpoints (per-user)
+// This prevents a single user from exhausting their budget too quickly
+// or causing excessive API costs through rapid-fire requests
+const aiRateLimiter = rateLimit({
+  windowMs: 1 * 60 * 1000, // 1 minute window
+  max: 10, // Max 10 AI requests per minute per user
+  message: { 
+    success: false, 
+    error: 'Too many AI requests. Please wait a moment before sending more messages.',
+    retryAfter: 60 
+  },
+  standardHeaders: true,
+  legacyHeaders: false,
+  // Use user ID from JWT token as key (falls back to IP if not authenticated)
+  keyGenerator: (req) => {
+    // Extract user ID from Authorization header if present
+    const authHeader = req.headers.authorization;
+    if (authHeader && authHeader.startsWith('Bearer ')) {
+      try {
+        const token = authHeader.split(' ')[1];
+        // Decode JWT payload (base64) to get userId - don't verify here, just extract
+        const payload = JSON.parse(Buffer.from(token.split('.')[1], 'base64').toString());
+        if (payload.userId) {
+          return `user_${payload.userId}`;
+        }
+      } catch {
+        // Fall through to IP-based limiting
+      }
+    }
+    return req.ip || 'unknown';
+  },
+  skip: (req) => {
+    // Skip rate limiting for non-message endpoints within sessions/comparison
+    // Only apply to actual AI generation endpoints
+    const isMessageEndpoint = req.path.includes('/messages') && req.method === 'POST';
+    const isCompareEndpoint = req.path.includes('/compare') && req.method === 'POST';
+    return !isMessageEndpoint && !isCompareEndpoint;
+  },
+});
+
+// Apply stricter rate limiting to AI-intensive routes
+app.use('/api/sessions', aiRateLimiter);
+app.use('/api/comparison', aiRateLimiter);
+
 // Body parsing middleware
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
