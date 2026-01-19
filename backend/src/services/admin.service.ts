@@ -404,6 +404,7 @@ export const resetStudentPassword = async (studentId: string, adminUserId?: stri
     data: { 
       password: hashedPassword,
       mustChangePassword: true, // Force password change on next login
+      passwordChangedAt: new Date(), // Invalidate all existing sessions
     },
   });
 
@@ -465,6 +466,7 @@ export const bulkOperation = async (input: BulkOperationInput, adminUserId?: str
             data: { 
               password: hashedPassword,
               mustChangePassword: true, // Force password change on next login
+              passwordChangedAt: new Date(), // Invalidate all existing sessions
             },
           });
           return { registrationId: student.registrationId, newPassword };
