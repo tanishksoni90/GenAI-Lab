@@ -20,6 +20,9 @@
   ],
   "author": "",
   "license": "ISC",
+  "prisma": {
+    "seed": "tsx src/seed.ts"
+  },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.71.2",
     "@google/generative-ai": "^0.24.1",
