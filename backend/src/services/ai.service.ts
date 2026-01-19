@@ -423,38 +423,51 @@ const callGoogle = async (
     const content = response.text();
 
     // Get actual token counts from API response (usageMetadata)
-    // IMPORTANT: Gemini's promptTokenCount is CUMULATIVE (includes all history)
-    // We need to calculate the INCREMENTAL tokens for just this exchange
+    // Gemini provides accurate token counts in the response
     const usageMetadata = response.usageMetadata;
     
-    // Calculate history tokens to subtract from cumulative promptTokenCount
-    // Each message in history contributes to the prompt token count
-    const historyText = conversationHistory.map(m => m.content).join('');
-    const estimatedHistoryTokens = Math.ceil(historyText.length / 4);
-    
-    // The cumulative prompt token count from Gemini
-    const cumulativePromptTokens = usageMetadata?.promptTokenCount || 0;
-    
-    // Calculate incremental input tokens (just for this prompt, not including history)
-    // If we have history, subtract estimated history tokens; otherwise use the prompt tokens directly
+    // For first message (no history), use API values directly
+    // For subsequent messages, Gemini's promptTokenCount includes history
+    // But we want to charge only for the NEW prompt tokens
     let inputTokens: number;
-    if (conversationHistory.length > 0 && cumulativePromptTokens > 0) {
-      // Subtract history tokens to get just the new prompt's tokens
-      inputTokens = Math.max(Math.ceil(prompt.length / 4), cumulativePromptTokens - estimatedHistoryTokens);
-      // Sanity check: input tokens should be roughly proportional to prompt length
-      const promptEstimate = Math.ceil(prompt.length / 4);
-      if (inputTokens > promptEstimate * 3) {
-        // If calculated value seems too high, use estimate
-        inputTokens = promptEstimate;
+    let outputTokens: number;
+    
+    if (usageMetadata) {
+      // Output tokens are always accurate (just for this response)
+      outputTokens = usageMetadata.candidatesTokenCount || 0;
+      
+      if (conversationHistory.length === 0) {
+        // First message - use API value directly
+        inputTokens = usageMetadata.promptTokenCount || 0;
+      } else {
+        // Subsequent messages - estimate just the new prompt's tokens
+        // Use Google's token estimation: ~4 chars per token for English
+        // This is more accurate than trying to subtract cumulative counts
+        inputTokens = Math.ceil(prompt.length / 4);
+        
+        // If we have a very short prompt but API reports high tokens,
+        // there might be system instructions - cap at reasonable multiple
+        const apiPromptTokens = usageMetadata.promptTokenCount || 0;
+        const historyTokenEstimate = conversationHistory.reduce(
+          (acc, msg) => acc + Math.ceil(msg.content.length / 4), 0
+        );
+        const newPromptTokensFromApi = apiPromptTokens - historyTokenEstimate;
+        
+        // Use API-derived value if it's reasonable
+        if (newPromptTokensFromApi > 0 && newPromptTokensFromApi < inputTokens * 3) {
+          inputTokens = newPromptTokensFromApi;
+        }
       }
     } else {
-      inputTokens = cumulativePromptTokens || Math.ceil(prompt.length / 4);
+      // Fallback to estimation if no metadata
+      inputTokens = Math.ceil(prompt.length / 4);
+      outputTokens = Math.ceil(content.length / 4);
     }
     
-    // Output tokens are NOT cumulative, they're just for this response
-    const outputTokens = usageMetadata?.candidatesTokenCount || Math.ceil(content.length / 4);
+    // Ensure minimum values
+    inputTokens = Math.max(1, inputTokens);
+    outputTokens = Math.max(1, outputTokens);
     
-    // Total tokens used for THIS exchange only (not cumulative)
     const tokensUsed = inputTokens + outputTokens;
 
     return { content, tokensUsed, inputTokens, outputTokens };
@@ -674,34 +687,44 @@ const streamGoogle = async (
   onChunk('', true); // Signal completion
 
   // Get actual token counts from final response
-  // IMPORTANT: Gemini's promptTokenCount is CUMULATIVE (includes all history)
-  // We need to calculate the INCREMENTAL tokens for just this exchange
   const response = await result.response;
   const usageMetadata = response.usageMetadata;
   
-  // Calculate history tokens to subtract from cumulative promptTokenCount
-  const historyText = conversationHistory.map(m => m.content).join('');
-  const estimatedHistoryTokens = Math.ceil(historyText.length / 4);
-  
-  // The cumulative prompt token count from Gemini
-  const cumulativePromptTokens = usageMetadata?.promptTokenCount || 0;
-  
-  // Calculate incremental input tokens (just for this prompt, not including history)
   let inputTokens: number;
-  if (conversationHistory.length > 0 && cumulativePromptTokens > 0) {
-    inputTokens = Math.max(Math.ceil(prompt.length / 4), cumulativePromptTokens - estimatedHistoryTokens);
-    const promptEstimate = Math.ceil(prompt.length / 4);
-    if (inputTokens > promptEstimate * 3) {
-      inputTokens = promptEstimate;
+  let outputTokens: number;
+  
+  if (usageMetadata) {
+    // Output tokens are always accurate (just for this response)
+    outputTokens = usageMetadata.candidatesTokenCount || 0;
+    
+    if (conversationHistory.length === 0) {
+      // First message - use API value directly
+      inputTokens = usageMetadata.promptTokenCount || 0;
+    } else {
+      // Subsequent messages - estimate just the new prompt's tokens
+      inputTokens = Math.ceil(prompt.length / 4);
+      
+      const apiPromptTokens = usageMetadata.promptTokenCount || 0;
+      const historyTokenEstimate = conversationHistory.reduce(
+        (acc, msg) => acc + Math.ceil(msg.content.length / 4), 0
+      );
+      const newPromptTokensFromApi = apiPromptTokens - historyTokenEstimate;
+      
+      // Use API-derived value if it's reasonable
+      if (newPromptTokensFromApi > 0 && newPromptTokensFromApi < inputTokens * 3) {
+        inputTokens = newPromptTokensFromApi;
+      }
     }
   } else {
-    inputTokens = cumulativePromptTokens || Math.ceil(prompt.length / 4);
+    // Fallback to estimation if no metadata
+    inputTokens = Math.ceil(prompt.length / 4);
+    outputTokens = Math.ceil(fullContent.length / 4);
   }
   
-  // Output tokens are NOT cumulative, they're just for this response
-  const outputTokens = usageMetadata?.candidatesTokenCount || Math.ceil(fullContent.length / 4);
+  // Ensure minimum values
+  inputTokens = Math.max(1, inputTokens);
+  outputTokens = Math.max(1, outputTokens);
   
-  // Total tokens used for THIS exchange only (not cumulative)
   const tokensUsed = inputTokens + outputTokens;
 
   return { tokensUsed, inputTokens, outputTokens };
