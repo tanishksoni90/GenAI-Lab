@@ -31,7 +31,8 @@ export const getStudent = async (req: Request, res: Response, next: NextFunction
 
 export const createStudent = async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const result = await adminService.createStudent(req.body);
+    const adminUserId = (req as any).user?.userId;
+    const result = await adminService.createStudent(req.body, adminUserId);
     return sendCreated(res, result, 'Student created successfully');
   } catch (error) {
     next(error);
@@ -40,7 +41,8 @@ export const createStudent = async (req: Request, res: Response, next: NextFunct
 
 export const updateStudent = async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const student = await adminService.updateStudent(req.params.id, req.body);
+    const adminUserId = (req as any).user?.userId;
+    const student = await adminService.updateStudent(req.params.id, req.body, adminUserId);
     return sendSuccess(res, { student }, 'Student updated successfully');
   } catch (error) {
     next(error);
@@ -49,8 +51,9 @@ export const updateStudent = async (req: Request, res: Response, next: NextFunct
 
 export const deleteStudent = async (req: Request, res: Response, next: NextFunction) => {
   try {
+    const adminUserId = (req as any).user?.userId;
     const permanent = req.query.permanent === 'true';
-    const result = await adminService.deleteStudent(req.params.id, permanent);
+    const result = await adminService.deleteStudent(req.params.id, permanent, adminUserId);
     return sendSuccess(res, result);
   } catch (error) {
     next(error);
@@ -59,7 +62,8 @@ export const deleteStudent = async (req: Request, res: Response, next: NextFunct
 
 export const resetStudentPassword = async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const result = await adminService.resetStudentPassword(req.params.id);
+    const adminUserId = (req as any).user?.userId;
+    const result = await adminService.resetStudentPassword(req.params.id, adminUserId);
     return sendSuccess(res, result, 'Password reset successfully');
   } catch (error) {
     next(error);
@@ -68,7 +72,8 @@ export const resetStudentPassword = async (req: Request, res: Response, next: Ne
 
 export const bulkOperation = async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const result = await adminService.bulkOperation(req.body);
+    const adminUserId = (req as any).user?.userId;
+    const result = await adminService.bulkOperation(req.body, adminUserId);
     return sendSuccess(res, result, 'Bulk operation completed');
   } catch (error) {
     next(error);

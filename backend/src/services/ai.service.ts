@@ -6,6 +6,95 @@ import OpenAI from 'openai';
 import Anthropic from '@anthropic-ai/sdk';
 import { GoogleGenerativeAI } from '@google/generative-ai';
 
+// ==================== RETRY CONFIGURATION ====================
+interface RetryConfig {
+  maxRetries: number;
+  baseDelayMs: number;
+  maxDelayMs: number;
+  retryableErrors: string[];
+}
+
+const DEFAULT_RETRY_CONFIG: RetryConfig = {
+  maxRetries: 3,
+  baseDelayMs: 1000,
+  maxDelayMs: 30000,
+  // Error codes/messages that are safe to retry
+  retryableErrors: [
+    'ETIMEDOUT',
+    'ECONNRESET',
+    'ECONNREFUSED',
+    'ENOTFOUND',
+    'rate_limit',
+    'rate limit',
+    '429',
+    '500',
+    '502',
+    '503',
+    '504',
+    'timeout',
+    'overloaded',
+    'capacity',
+  ],
+};
+
+// Check if an error is retryable
+const isRetryableError = (error: any, config: RetryConfig = DEFAULT_RETRY_CONFIG): boolean => {
+  const errorMessage = String(error?.message || error || '').toLowerCase();
+  const errorCode = String(error?.code || '').toLowerCase();
+  const statusCode = String(error?.status || error?.statusCode || '');
+  
+  return config.retryableErrors.some(retryable => 
+    errorMessage.includes(retryable.toLowerCase()) ||
+    errorCode.includes(retryable.toLowerCase()) ||
+    statusCode === retryable
+  );
+};
+
+// Calculate delay with exponential backoff and jitter
+const calculateBackoffDelay = (
+  attempt: number, 
+  config: RetryConfig = DEFAULT_RETRY_CONFIG
+): number => {
+  // Exponential backoff: baseDelay * 2^attempt
+  const exponentialDelay = config.baseDelayMs * Math.pow(2, attempt);
+  // Add jitter (±25% randomness) to prevent thundering herd
+  const jitter = exponentialDelay * (0.75 + Math.random() * 0.5);
+  // Cap at maxDelay
+  return Math.min(jitter, config.maxDelayMs);
+};
+
+// Retry wrapper for async functions
+const withRetry = async <T>(
+  fn: () => Promise<T>,
+  operationName: string,
+  config: RetryConfig = DEFAULT_RETRY_CONFIG
+): Promise<T> => {
+  let lastError: any;
+  
+  for (let attempt = 0; attempt <= config.maxRetries; attempt++) {
+    try {
+      return await fn();
+    } catch (error: any) {
+      lastError = error;
+      
+      // Don't retry if this is the last attempt or error is not retryable
+      if (attempt === config.maxRetries || !isRetryableError(error, config)) {
+        throw error;
+      }
+      
+      const delay = calculateBackoffDelay(attempt, config);
+      console.warn(
+        `[AI Service] ${operationName} failed (attempt ${attempt + 1}/${config.maxRetries + 1}), ` +
+        `retrying in ${Math.round(delay)}ms: ${error?.message || error}`
+      );
+      
+      await new Promise(resolve => setTimeout(resolve, delay));
+    }
+  }
+  
+  throw lastError;
+};
+
 // Cache for API keys from database (with TTL)
 interface CachedApiKey {
   apiKey: string;
@@ -207,26 +296,28 @@ const callOpenAI = async (
     throw new BadRequestError('OpenAI API key not configured. Please add it in Admin Dashboard → API Keys.');
   }
 
-  // Handle image generation (DALL-E)
+  // Handle image generation (DALL-E) with retry
   if (category === 'image') {
-    const response = await client.images.generate({
-      model: modelId,
-      prompt: prompt,
-      n: 1,
-      size: '1024x1024',
-    });
-    
-    const imageData = response.data?.[0];
-    const imageUrl = imageData?.url || imageData?.b64_json || '';
-    return {
-      content: `![Generated Image](${imageUrl})\n\n*Image generated using ${modelId}*`,
-      tokensUsed: 1000, // DALL-E has fixed per-image cost
-      inputTokens: 0,
-      outputTokens: 1000,
-    };
+    return withRetry(async () => {
+      const response = await client.images.generate({
+        model: modelId,
+        prompt: prompt,
+        n: 1,
+        size: '1024x1024',
+      });
+      
+      const imageData = response.data?.[0];
+      const imageUrl = imageData?.url || imageData?.b64_json || '';
+      return {
+        content: `![Generated Image](${imageUrl})\n\n*Image generated using ${modelId}*`,
+        tokensUsed: 1000, // DALL-E has fixed per-image cost
+        inputTokens: 0,
+        outputTokens: 1000,
+      };
+    }, `OpenAI Image Generation (${modelId})`);
   }
 
-  // Handle text/chat models
+  // Handle text/chat models with retry
   const messages: OpenAI.Chat.ChatCompletionMessageParam[] = [
     ...conversationHistory.map(msg => ({
       role: msg.role as 'user' | 'assistant' | 'system',
@@ -235,20 +326,22 @@ const callOpenAI = async (
     { role: 'user' as const, content: prompt },
   ];
 
-  const response = await client.chat.completions.create({
-    model: modelId,
-    messages,
-    max_tokens: DEFAULT_MAX_OUTPUT_TOKENS,
-  });
+  return withRetry(async () => {
+    const response = await client.chat.completions.create({
+      model: modelId,
+      messages,
+      max_tokens: DEFAULT_MAX_OUTPUT_TOKENS,
+    });
 
-  const content = response.choices[0]?.message?.content || '';
-  
-  // Get actual token counts from API response
-  const inputTokens = response.usage?.prompt_tokens || Math.ceil(prompt.length / 4);
-  const outputTokens = response.usage?.completion_tokens || Math.ceil(content.length / 4);
-  const tokensUsed = response.usage?.total_tokens || (inputTokens + outputTokens);
+    const content = response.choices[0]?.message?.content || '';
+    
+    // Get actual token counts from API response
+    const inputTokens = response.usage?.prompt_tokens || Math.ceil(prompt.length / 4);
+    const outputTokens = response.usage?.completion_tokens || Math.ceil(content.length / 4);
+    const tokensUsed = response.usage?.total_tokens || (inputTokens + outputTokens);
 
-  return { content, tokensUsed, inputTokens, outputTokens };
+    return { content, tokensUsed, inputTokens, outputTokens };
+  }, `OpenAI Chat (${modelId})`);
 };
 
 // Anthropic API call (Claude models)
@@ -271,22 +364,24 @@ const callAnthropic = async (
     { role: 'user' as const, content: prompt },
   ];
 
-  const response = await client.messages.create({
-    model: modelId,
-    max_tokens: DEFAULT_MAX_OUTPUT_TOKENS,
-    messages,
-  });
+  return withRetry(async () => {
+    const response = await client.messages.create({
+      model: modelId,
+      max_tokens: DEFAULT_MAX_OUTPUT_TOKENS,
+      messages,
+    });
 
-  const content = response.content[0]?.type === 'text' 
-    ? response.content[0].text 
-    : '';
-  
-  // Get actual token counts from API response
-  const inputTokens = response.usage?.input_tokens || Math.ceil(prompt.length / 4);
-  const outputTokens = response.usage?.output_tokens || Math.ceil(content.length / 4);
-  const tokensUsed = inputTokens + outputTokens;
+    const content = response.content[0]?.type === 'text' 
+      ? response.content[0].text 
+      : '';
+    
+    // Get actual token counts from API response
+    const inputTokens = response.usage?.input_tokens || Math.ceil(prompt.length / 4);
+    const outputTokens = response.usage?.output_tokens || Math.ceil(content.length / 4);
+    const tokensUsed = inputTokens + outputTokens;
 
-  return { content, tokensUsed, inputTokens, outputTokens };
+    return { content, tokensUsed, inputTokens, outputTokens };
+  }, `Anthropic (${modelId})`);
 };
 
 // Default max output tokens for responses (can be made configurable later)
@@ -322,46 +417,48 @@ const callGoogle = async (
     history: history as any,
   });
 
-  const result = await chat.sendMessage(prompt);
-  const response = await result.response;
-  const content = response.text();
+  return withRetry(async () => {
+    const result = await chat.sendMessage(prompt);
+    const response = await result.response;
+    const content = response.text();
 
-  // Get actual token counts from API response (usageMetadata)
-  // IMPORTANT: Gemini's promptTokenCount is CUMULATIVE (includes all history)
-  // We need to calculate the INCREMENTAL tokens for just this exchange
-  const usageMetadata = response.usageMetadata;
-  
-  // Calculate history tokens to subtract from cumulative promptTokenCount
-  // Each message in history contributes to the prompt token count
-  const historyText = conversationHistory.map(m => m.content).join('');
-  const estimatedHistoryTokens = Math.ceil(historyText.length / 4);
-  
-  // The cumulative prompt token count from Gemini
-  const cumulativePromptTokens = usageMetadata?.promptTokenCount || 0;
-  
-  // Calculate incremental input tokens (just for this prompt, not including history)
-  // If we have history, subtract estimated history tokens; otherwise use the prompt tokens directly
-  let inputTokens: number;
-  if (conversationHistory.length > 0 && cumulativePromptTokens > 0) {
-    // Subtract history tokens to get just the new prompt's tokens
-    inputTokens = Math.max(Math.ceil(prompt.length / 4), cumulativePromptTokens - estimatedHistoryTokens);
-    // Sanity check: input tokens should be roughly proportional to prompt length
-    const promptEstimate = Math.ceil(prompt.length / 4);
-    if (inputTokens > promptEstimate * 3) {
-      // If calculated value seems too high, use estimate
-      inputTokens = promptEstimate;
+    // Get actual token counts from API response (usageMetadata)
+    // IMPORTANT: Gemini's promptTokenCount is CUMULATIVE (includes all history)
+    // We need to calculate the INCREMENTAL tokens for just this exchange
+    const usageMetadata = response.usageMetadata;
+    
+    // Calculate history tokens to subtract from cumulative promptTokenCount
+    // Each message in history contributes to the prompt token count
+    const historyText = conversationHistory.map(m => m.content).join('');
+    const estimatedHistoryTokens = Math.ceil(historyText.length / 4);
+    
+    // The cumulative prompt token count from Gemini
+    const cumulativePromptTokens = usageMetadata?.promptTokenCount || 0;
+    
+    // Calculate incremental input tokens (just for this prompt, not including history)
+    // If we have history, subtract estimated history tokens; otherwise use the prompt tokens directly
+    let inputTokens: number;
+    if (conversationHistory.length > 0 && cumulativePromptTokens > 0) {
+      // Subtract history tokens to get just the new prompt's tokens
+      inputTokens = Math.max(Math.ceil(prompt.length / 4), cumulativePromptTokens - estimatedHistoryTokens);
+      // Sanity check: input tokens should be roughly proportional to prompt length
+      const promptEstimate = Math.ceil(prompt.length / 4);
+      if (inputTokens > promptEstimate * 3) {
+        // If calculated value seems too high, use estimate
+        inputTokens = promptEstimate;
+      }
+    } else {
+      inputTokens = cumulativePromptTokens || Math.ceil(prompt.length / 4);
     }
-  } else {
-    inputTokens = cumulativePromptTokens || Math.ceil(prompt.length / 4);
-  }
-  
-  // Output tokens are NOT cumulative, they're just for this response
-  const outputTokens = usageMetadata?.candidatesTokenCount || Math.ceil(content.length / 4);
-  
-  // Total tokens used for THIS exchange only (not cumulative)
-  const tokensUsed = inputTokens + outputTokens;
+    
+    // Output tokens are NOT cumulative, they're just for this response
+    const outputTokens = usageMetadata?.candidatesTokenCount || Math.ceil(content.length / 4);
+    
+    // Total tokens used for THIS exchange only (not cumulative)
+    const tokensUsed = inputTokens + outputTokens;
 
-  return { content, tokensUsed, inputTokens, outputTokens };
+    return { content, tokensUsed, inputTokens, outputTokens };
+  }, `Google Gemini (${modelId})`);
 };
 
 // ElevenLabs API call (Text-to-Speech)
@@ -377,39 +474,41 @@ const callElevenLabs = async (
   // Default voice ID (Rachel - a neutral female voice)
   const voiceId = 'EXAVITQu4vr4xnSDxMaL';
   
-  const response = await fetch(
-    `https://api.elevenlabs.io/v1/text-to-speech/${voiceId}`,
-    {
-      method: 'POST',
-      headers: {
-        'Accept': 'audio/mpeg',
-        'Content-Type': 'application/json',
-        'xi-api-key': keyData.apiKey,
-      },
-      body: JSON.stringify({
-        text: text,
-        model_id: modelId,
-        voice_settings: {
-          stability: 0.5,
-          similarity_boost: 0.75,
+  return withRetry(async () => {
+    const response = await fetch(
+      `https://api.elevenlabs.io/v1/text-to-speech/${voiceId}`,
+      {
+        method: 'POST',
+        headers: {
+          'Accept': 'audio/mpeg',
+          'Content-Type': 'application/json',
+          'xi-api-key': keyData.apiKey,
         },
-      }),
+        body: JSON.stringify({
+          text: text,
+          model_id: modelId,
+          voice_settings: {
+            stability: 0.5,
+            similarity_boost: 0.75,
+          },
+        }),
+      }
+    );
+
+    if (!response.ok) {
+      const error = await response.text();
+      throw new BadRequestError(`ElevenLabs API error: ${error}`);
     }
-  );
 
-  if (!response.ok) {
-    const error = await response.text();
-    throw new BadRequestError(`ElevenLabs API error: ${error}`);
-  }
-
-  // Convert audio to base64
-  const audioBuffer = await response.arrayBuffer();
-  const base64Audio = Buffer.from(audioBuffer).toString('base64');
-  
-  return {
-    content: `🎵 **Audio Generated**\n\n[Audio Player]\ndata:audio/mpeg;base64,${base64Audio}\n\n*Generated using ElevenLabs ${modelId}*`,
-    tokensUsed: Math.ceil(text.length * 0.5), // ElevenLabs charges per character
-  };
+    // Convert audio to base64
+    const audioBuffer = await response.arrayBuffer();
+    const base64Audio = Buffer.from(audioBuffer).toString('base64');
+    
+    return {
+      content: `🎵 **Audio Generated**\n\n[Audio Player]\ndata:audio/mpeg;base64,${base64Audio}\n\n*Generated using ElevenLabs ${modelId}*`,
+      tokensUsed: Math.ceil(text.length * 0.5), // ElevenLabs charges per character
+    };
+  }, `ElevenLabs TTS (${modelId})`);
 };
 
 // ==================== STREAMING API IMPLEMENTATIONS ====================
