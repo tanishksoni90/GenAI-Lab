@@ -22,6 +22,7 @@ model User {
   
   // Password management
   mustChangePassword Boolean @default(false) // Force password change on next login
+  passwordChangedAt  DateTime? // Track when password was last changed (for session invalidation)
   
   // Account lockout (security)
   failedLoginAttempts Int      @default(0)

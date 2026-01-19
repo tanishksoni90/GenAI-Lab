@@ -23,6 +23,7 @@ interface JwtPayload {
   email: string;
   role: string;
   name: string;
+  iat?: number; // Issued at timestamp
 }
 
 // Verify JWT token and attach user to request
@@ -45,11 +46,19 @@ export const authenticate = async (
     // Verify user still exists and is active
     const user = await prisma.user.findUnique({
       where: { id: decoded.userId },
-      select: { id: true, email: true, role: true, name: true, isActive: true },
+      select: { id: true, email: true, role: true, name: true, isActive: true, passwordChangedAt: true },
     });
     
     if (!user || !user.isActive) {
       throw new UnauthorizedError('User not found or inactive');
+    }
+    
+    // Check if password was changed after token was issued (invalidates old sessions)
+    if (user.passwordChangedAt && decoded.iat) {
+      const passwordChangedTimestamp = Math.floor(user.passwordChangedAt.getTime() / 1000);
+      if (passwordChangedTimestamp > decoded.iat) {
+        throw new UnauthorizedError('Password changed. Please login again.');
+      }
     }
     
     req.user = {

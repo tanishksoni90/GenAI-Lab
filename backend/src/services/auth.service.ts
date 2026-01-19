@@ -430,10 +430,11 @@ export const changePassword = async (
     data: { 
       password: hashedPassword,
       mustChangePassword: false, // Clear the flag after password change
+      passwordChangedAt: new Date(), // Invalidate all existing sessions
     },
   });
   
-  return { message: 'Password changed successfully' };
+  return { message: 'Password changed successfully. Please login again on other devices.' };
 };
 
 // Set new password (for forced password change after admin reset)
@@ -462,9 +463,10 @@ export const setNewPassword = async (
     data: { 
       password: hashedPassword,
       mustChangePassword: false,
+      passwordChangedAt: new Date(), // Invalidate all existing sessions
     },
   });
   
-  return { message: 'Password set successfully' };
+  return { message: 'Password set successfully. Please login again.' };
 };
 
