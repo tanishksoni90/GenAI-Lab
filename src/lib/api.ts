@@ -346,24 +346,24 @@ export interface Message {
 
 export interface ScoreResult {
   totalScore: number;
-  criteria: {
-    clarity: number;
-    context: number;
-    specificity: number;
-    structure: number;
-    relevance: number;
-    constraints: number;
-  };
-  feedback: {
+  criteria: Array<{
+    name: string;
+    score: number;
+    maxScore: number;
+    feedback: string;
+  }>;
+  analysisSource?: string;
+  feedback?: {
     strengths: string[];
     improvements: string[];
     biggestGap: string;
     suggestion: string;
-  };
-  comparison: {
-    weakExample: { prompt: string; issue: string };
-    strongExample: { prompt: string; why: string };
-  };
+  } | string;
+  comparison?: {
+    weakExample?: { prompt: string; issue: string };
+    strongExample?: { prompt: string; why: string };
+  } | string;
+  analysisCostUSD?: number;
 }
 
 export interface SendMessageResult {

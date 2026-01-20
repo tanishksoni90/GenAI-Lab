@@ -25,13 +25,22 @@ import { useState, useEffect, useRef } from "react";
 import { calculateRequestCost } from "@/lib/modelPricing";
 import { useToast } from "@/hooks/use-toast";
 
-// Score result interface for transformation
+// Score result interface for transformation (matches api.ts ScoreResult)
 interface ScoreResult {
   criteria?: Array<{ name: string; score: number; maxScore: number; feedback: string }>;
   analysisSource?: string;
-  comparison?: string;
-  feedback?: string;
+  comparison?: string | {
+    weakExample?: { prompt: string; issue: string };
+    strongExample?: { prompt: string; why: string };
+  };
+  feedback?: string | {
+    strengths: string[];
+    improvements: string[];
+    biggestGap: string;
+    suggestion: string;
+  };
   totalScore?: number;
+  analysisCostUSD?: number;
 }
 
 // Helper function to transform score/feedback data
@@ -57,11 +66,21 @@ function transformScoreResult(scoreResult: ScoreResult | undefined) {
   const highScoreCriteria = criteriaDetails.filter(c => c.score >= c.maxScore * 0.7);
   const lowScoreCriteria = criteriaDetails.filter(c => c.score < c.maxScore * 0.7);
 
+  // Extract suggestion as string - handle both string and object forms
+  const getSuggestion = (): string | undefined => {
+    if (typeof scoreResult.comparison === 'string') return scoreResult.comparison;
+    if (typeof scoreResult.feedback === 'string') return scoreResult.feedback;
+    if (typeof scoreResult.feedback === 'object' && scoreResult.feedback?.suggestion) {
+      return scoreResult.feedback.suggestion;
+    }
+    return undefined;
+  };
+
   const feedbackData = isGemini
     ? {
         strengths: highScoreCriteria.map(c => `**${c.name}**: ${c.feedback}`),
         improvements: lowScoreCriteria.map(c => `**${c.name}**: ${c.feedback}`),
-        suggestion: scoreResult.comparison || scoreResult.feedback,
+        suggestion: getSuggestion(),
         biggestGap: typeof scoreResult.feedback === 'string' && lowScoreCriteria.length > 0
           ? scoreResult.feedback
           : undefined,
@@ -69,7 +88,7 @@ function transformScoreResult(scoreResult: ScoreResult | undefined) {
     : {
         strengths: highScoreCriteria.map(c => c.feedback),
         improvements: lowScoreCriteria.map(c => c.feedback),
-        suggestion: scoreResult.comparison || scoreResult.feedback,
+        suggestion: getSuggestion(),
       };
 
   return { scoreBreakdown, feedbackData };

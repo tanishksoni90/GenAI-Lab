@@ -35,14 +35,7 @@ interface ChatMessage {
   content: string;
   timestamp?: string;
   score?: number;
-  scoreBreakdown?: { 
-    clarity: number; 
-    specificity: number; 
-    context: number; 
-    relevance: number;
-    structure?: number;
-    constraints?: number;
-  };
+  scoreBreakdown?: Record<string, number>;
   tokensUsed?: number;
   tokens?: number;
   blocked?: boolean;
