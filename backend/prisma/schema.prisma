@@ -1,12 +1,12 @@
 // Prisma Schema for GenAI Lab
-// Using SQLite for local development (easily migrated to other DBs)
+// Using PostgreSQL for local development and production
 
 generator client {
   provider = "prisma-client-js"
 }
 
 datasource db {
-  provider = "sqlite"
+  provider = "postgresql"
   url      = env("DATABASE_URL")
 }
 
@@ -54,7 +54,7 @@ model User {
   
   // Relations
   sessions      Session[]
-  agents        Agent[]
+  chatbots      Chatbot[]
   artifacts     Artifact[]
   activityLogs  ActivityLog[]
   comparisonSessions ComparisonSession[]
@@ -149,7 +149,7 @@ model AIModel {
   
   // Relations
   sessions    Session[]
-  agents      Agent[]
+  chatbots    Chatbot[]
   modelAccess ModelAccess[]
   
   @@unique([provider, modelId])
@@ -182,8 +182,8 @@ model Session {
   user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
   modelId     String
   model       AIModel   @relation(fields: [modelId], references: [id])
-  agentId     String?
-  agent       Agent?    @relation(fields: [agentId], references: [id])
+  chatbotId   String?
+  chatbot     Chatbot?  @relation(fields: [chatbotId], references: [id])
   
   title       String?
   
@@ -211,7 +211,7 @@ model Session {
   
   @@index([userId])
   @@index([modelId])
-  @@index([agentId])
+  @@index([chatbotId])
   @@index([createdAt])
   @@index([updatedAt])
 }
@@ -244,9 +244,9 @@ model Message {
   @@index([createdAt])
 }
 
-// ==================== AI AGENTS ====================
+// ==================== AI CHATBOTS ====================
 
-model Agent {
+model Chatbot {
   id              String   @id @default(uuid())
   userId          String
   user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
@@ -272,21 +272,21 @@ model Agent {
   
   // Relations
   sessions        Session[]
-  guardrails      AgentGuardrail[]
+  guardrails      ChatbotGuardrail[]
   
   @@index([userId])
   @@index([modelId])
   @@index([createdAt])
 }
 
-model AgentGuardrail {
+model ChatbotGuardrail {
   id          String   @id @default(uuid())
-  agentId     String
-  agent       Agent    @relation(fields: [agentId], references: [id], onDelete: Cascade)
+  chatbotId   String
+  chatbot     Chatbot  @relation(fields: [chatbotId], references: [id], onDelete: Cascade)
   guardrailId String
   guardrail   Guardrail @relation(fields: [guardrailId], references: [id])
   
-  @@unique([agentId, guardrailId])
+  @@unique([chatbotId, guardrailId])
 }
 
 // ==================== GUARDRAILS ====================
@@ -305,7 +305,7 @@ model Guardrail {
   updatedAt   DateTime @updatedAt
   
   // Relations
-  agentGuardrails AgentGuardrail[]
+  chatbotGuardrails ChatbotGuardrail[]
 }
 
 // ==================== ARTIFACTS ====================

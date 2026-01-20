@@ -25,6 +25,56 @@ import { useState, useEffect, useRef } from "react";
 import { calculateRequestCost } from "@/lib/modelPricing";
 import { useToast } from "@/hooks/use-toast";
 
+// Score result interface for transformation
+interface ScoreResult {
+  criteria?: Array<{ name: string; score: number; maxScore: number; feedback: string }>;
+  analysisSource?: string;
+  comparison?: string;
+  feedback?: string;
+  totalScore?: number;
+}
+
+// Helper function to transform score/feedback data
+function transformScoreResult(scoreResult: ScoreResult | undefined) {
+  if (!scoreResult) return { scoreBreakdown: undefined, feedbackData: undefined };
+
+  let scoreBreakdown: Record<string, number> | undefined;
+  let criteriaDetails: Array<{ name: string; score: number; maxScore: number; feedback: string }> = [];
+
+  if (scoreResult.criteria && Array.isArray(scoreResult.criteria)) {
+    scoreBreakdown = {};
+    criteriaDetails = scoreResult.criteria;
+    scoreResult.criteria.forEach((criterion) => {
+      const key = criterion.name.toLowerCase().replace(/\s+/g, '');
+      // Guard against division by zero
+      scoreBreakdown![key] = criterion.maxScore > 0
+        ? Math.round((criterion.score / criterion.maxScore) * 100)
+        : 0;
+    });
+  }
+
+  const isGemini = scoreResult.analysisSource === 'gemini';
+  const highScoreCriteria = criteriaDetails.filter(c => c.score >= c.maxScore * 0.7);
+  const lowScoreCriteria = criteriaDetails.filter(c => c.score < c.maxScore * 0.7);
+
+  const feedbackData = isGemini
+    ? {
+        strengths: highScoreCriteria.map(c => `**${c.name}**: ${c.feedback}`),
+        improvements: lowScoreCriteria.map(c => `**${c.name}**: ${c.feedback}`),
+        suggestion: scoreResult.comparison || scoreResult.feedback,
+        biggestGap: typeof scoreResult.feedback === 'string' && lowScoreCriteria.length > 0
+          ? scoreResult.feedback
+          : undefined,
+      }
+    : {
+        strengths: highScoreCriteria.map(c => c.feedback),
+        improvements: lowScoreCriteria.map(c => c.feedback),
+        suggestion: scoreResult.comparison || scoreResult.feedback,
+      };
+
+  return { scoreBreakdown, feedbackData };
+}
+
 // Local message type for UI state
 interface ChatMessage {
   id: string;
@@ -100,7 +150,7 @@ const ChatbotChat = () => {
     if (currentSession && currentSession.messages && currentSession.messages.length > 0) {
       const loadedMessages: ChatMessage[] = currentSession.messages.map((msg: Message) => {
         // Parse feedback if it's a JSON string
-        let scoreResult = undefined;
+        let scoreResult: ScoreResult | undefined = undefined;
         if (msg.feedback) {
           try {
             scoreResult = typeof msg.feedback === 'string' ? JSON.parse(msg.feedback) : msg.feedback;
@@ -109,45 +159,8 @@ const ChatbotChat = () => {
           }
         }
         
-        // Transform criteria array to scoreBreakdown object
-        let scoreBreakdown: Record<string, number> | undefined;
-        let criteriaDetails: Array<{ name: string; score: number; maxScore: number; feedback: string }> = [];
-        
-        if (scoreResult?.criteria && Array.isArray(scoreResult.criteria)) {
-          scoreBreakdown = {};
-          criteriaDetails = scoreResult.criteria;
-          scoreResult.criteria.forEach((criterion: { name: string; score: number; maxScore: number; feedback: string }) => {
-            const key = criterion.name.toLowerCase().replace(/\s+/g, '');
-            scoreBreakdown![key] = Math.round((criterion.score / criterion.maxScore) * 100);
-          });
-        }
-
-        // Extract feedback - properly handle Gemini vs rule-based responses
-        let feedbackData: { strengths?: string[]; improvements?: string[]; biggestGap?: string; suggestion?: string } | undefined;
-        if (scoreResult) {
-          const isGemini = scoreResult.analysisSource === 'gemini';
-          
-          if (isGemini) {
-            const highScoreCriteria = criteriaDetails.filter(c => c.score >= c.maxScore * 0.7);
-            const lowScoreCriteria = criteriaDetails.filter(c => c.score < c.maxScore * 0.7);
-            
-            feedbackData = {
-              strengths: highScoreCriteria.map(c => `**${c.name}**: ${c.feedback}`),
-              improvements: lowScoreCriteria.map(c => `**${c.name}**: ${c.feedback}`),
-              suggestion: scoreResult.comparison || scoreResult.feedback,
-            };
-            
-            if (typeof scoreResult.feedback === 'string' && lowScoreCriteria.length > 0) {
-              feedbackData.biggestGap = scoreResult.feedback;
-            }
-          } else {
-            feedbackData = {
-              strengths: criteriaDetails.filter(c => c.score >= c.maxScore * 0.7).map(c => c.feedback),
-              improvements: criteriaDetails.filter(c => c.score < c.maxScore * 0.7).map(c => c.feedback),
-              suggestion: scoreResult.comparison || scoreResult.feedback,
-            };
-          }
-        }
+        // Use helper function to transform score/feedback data
+        const { scoreBreakdown, feedbackData } = transformScoreResult(scoreResult);
         
         return {
           id: msg.id,
@@ -215,8 +228,10 @@ const ChatbotChat = () => {
 
     const inputTokens = Math.ceil(inputMessage.length / 4);
     const estimatedOutputTokens = 150;
-    const userTokenCost = calculateRequestCost(chatbot.modelId, inputTokens, 0, inputMessage.length);
-    const responseTokenCost = calculateRequestCost(chatbot.modelId, 0, estimatedOutputTokens, inputMessage.length);
+    // Use the model's actual modelId (e.g., 'gpt-3.5-turbo') for pricing, not the UUID
+    const modelIdForPricing = chatbot.model?.modelId || chatbot.modelId;
+    const userTokenCost = calculateRequestCost(modelIdForPricing, inputTokens, 0, inputMessage.length);
+    const responseTokenCost = calculateRequestCost(modelIdForPricing, 0, estimatedOutputTokens, inputMessage.length);
     const totalCost = userTokenCost + responseTokenCost;
     
     if (stats && stats.tokens.remaining < totalCost) {
@@ -248,59 +263,23 @@ const ChatbotChat = () => {
       });
       
       // Parse feedback from the response
-      let parsedFeedback = undefined;
+      let scoreResult: ScoreResult | undefined = undefined;
       if (result.userMessage.feedback) {
         try {
-          parsedFeedback = typeof result.userMessage.feedback === 'string' 
+          scoreResult = typeof result.userMessage.feedback === 'string' 
             ? JSON.parse(result.userMessage.feedback) 
             : result.userMessage.feedback;
         } catch {
-          parsedFeedback = undefined;
+          scoreResult = undefined;
         }
       }
-      
-      // Transform criteria array to scoreBreakdown object
-      // Backend sends: [{name: 'Clarity', score: 20, maxScore: 25, feedback: '...'}, ...]
-      // Frontend expects: {clarity: 80, specificity: 75, ...} (percentage values)
-      let scoreBreakdown: Record<string, number> | undefined;
-      let criteriaDetails: Array<{ name: string; score: number; maxScore: number; feedback: string }> = [];
-      const scoreResult = parsedFeedback || result.userMessage.scoreResult;
-      
-      if (scoreResult?.criteria && Array.isArray(scoreResult.criteria)) {
-        scoreBreakdown = {};
-        criteriaDetails = scoreResult.criteria;
-        scoreResult.criteria.forEach((criterion: { name: string; score: number; maxScore: number; feedback: string }) => {
-          const key = criterion.name.toLowerCase().replace(/\s+/g, '');
-          scoreBreakdown![key] = Math.round((criterion.score / criterion.maxScore) * 100);
-        });
+      // Fallback to scoreResult from response if feedback parsing failed
+      if (!scoreResult && result.userMessage.scoreResult) {
+        scoreResult = result.userMessage.scoreResult;
       }
-
-      // Extract feedback - properly handle Gemini vs rule-based responses
-      let feedbackData: { strengths?: string[]; improvements?: string[]; biggestGap?: string; suggestion?: string } | undefined;
-      if (scoreResult) {
-        const isGemini = scoreResult.analysisSource === 'gemini';
-        
-        if (isGemini) {
-          const highScoreCriteria = criteriaDetails.filter(c => c.score >= c.maxScore * 0.7);
-          const lowScoreCriteria = criteriaDetails.filter(c => c.score < c.maxScore * 0.7);
-          
-          feedbackData = {
-            strengths: highScoreCriteria.map(c => `**${c.name}**: ${c.feedback}`),
-            improvements: lowScoreCriteria.map(c => `**${c.name}**: ${c.feedback}`),
-            suggestion: scoreResult.comparison || scoreResult.feedback,
-          };
-          
-          if (typeof scoreResult.feedback === 'string' && lowScoreCriteria.length > 0) {
-            feedbackData.biggestGap = scoreResult.feedback;
-          }
-        } else {
-          feedbackData = {
-            strengths: criteriaDetails.filter(c => c.score >= c.maxScore * 0.7).map(c => c.feedback),
-            improvements: criteriaDetails.filter(c => c.score < c.maxScore * 0.7).map(c => c.feedback),
-            suggestion: scoreResult.comparison || scoreResult.feedback,
-          };
-        }
-      }
+      
+      // Use helper function to transform score/feedback data
+      const { scoreBreakdown, feedbackData } = transformScoreResult(scoreResult);
 
       // Update with actual server response
       const actualUserMessage: ChatMessage = {
@@ -620,10 +599,10 @@ const ChatbotChat = () => {
                         >
                           <Copy className="w-3.5 h-3.5" />
                         </Button>
-                        <Button variant="ghost" size="icon" className="h-7 w-7 hover:bg-white/5">
+                        <Button variant="ghost" size="icon" className="h-7 w-7 hover:bg-white/5" disabled title="Coming soon">
                           <ThumbsUp className="w-3.5 h-3.5" />
                         </Button>
-                        <Button variant="ghost" size="icon" className="h-7 w-7 hover:bg-white/5">
+                        <Button variant="ghost" size="icon" className="h-7 w-7 hover:bg-white/5" disabled title="Coming soon">
                           <ThumbsDown className="w-3.5 h-3.5" />
                         </Button>
                       </>

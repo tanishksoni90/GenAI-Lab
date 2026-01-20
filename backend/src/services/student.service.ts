@@ -39,8 +39,8 @@ export const getDashboardStats = async (userId: string) => {
     where: { userId },
   });
 
-  // Get agent count
-  const agentCount = await prisma.agent.count({
+  // Get chatbot count
+  const chatbotCount = await prisma.chatbot.count({
     where: { userId },
   });
 
@@ -96,7 +96,7 @@ export const getDashboardStats = async (userId: string) => {
       avgScore: Math.round((sessionStats._avg.avgScore || 0) * 10) / 10,
       prompts: promptCount,
       artifacts: artifactCount,
-      agents: agentCount,
+      chatbots: chatbotCount,
     },
     tokens: {
       quota: user.tokenQuota,
@@ -119,7 +119,7 @@ export const getRecentSessions = async (userId: string, limit: number = 10) => {
       model: {
         select: { id: true, name: true, provider: true, category: true },
       },
-      agent: {
+      chatbot: {
         select: { id: true, name: true },
       },
       _count: {
@@ -219,7 +219,7 @@ export const getActivityCalendar = async (userId: string) => {
         gte: startOfMonth,
         lte: endOfMonth,
       },
-      action: { in: ['session_start', 'agent_create', 'login'] },
+      action: { in: ['session_start', 'chatbot_create', 'login'] },
     },
     select: { createdAt: true },
   });

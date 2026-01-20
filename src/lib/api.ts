@@ -311,7 +311,7 @@ export interface Session {
   id: string;
   userId: string;
   modelId: string;
-  agentId?: string;
+  chatbotId?: string;
   title?: string;
   totalScore: number;
   avgScore: number;
@@ -326,7 +326,7 @@ export interface Session {
     provider: string;
     category: string;
   };
-  agent?: {
+  chatbot?: {
     id: string;
     name: string;
   };
@@ -379,18 +379,18 @@ export interface SendMessageResult {
 }
 
 export const sessionsApi = {
-  create: (data: { modelId: string; agentId?: string; title?: string }) =>
+  create: (data: { modelId: string; chatbotId?: string; title?: string }) =>
     apiRequest<ApiResponse<{ session: Session }>>('/sessions', {
       method: 'POST',
       body: JSON.stringify(data),
     }),
 
-  getAll: (params?: { page?: number; limit?: number; modelId?: string; agentId?: string }) => {
+  getAll: (params?: { page?: number; limit?: number; modelId?: string; chatbotId?: string }) => {
     const query = new URLSearchParams();
     if (params?.page) query.set('page', params.page.toString());
     if (params?.limit) query.set('limit', params.limit.toString());
     if (params?.modelId) query.set('modelId', params.modelId);
-    if (params?.agentId) query.set('agentId', params.agentId);
+    if (params?.chatbotId) query.set('chatbotId', params.chatbotId);
     return apiRequest<PaginatedResponse<Session>>(`/sessions?${query}`);
   },
 
@@ -473,7 +473,7 @@ export interface DashboardStats {
     avgScore: number;
     prompts: number;
     artifacts: number;
-    agents: number;
+    chatbots: number;
   };
   tokens: {
     quota: number;
@@ -528,9 +528,9 @@ export const studentApi = {
     apiRequest<ApiResponse<ActivityCalendar>>('/students/activity-calendar'),
 };
 
-// ==================== AGENTS API ====================
+// ==================== CHATBOTS API ====================
 
-export interface Agent {
+export interface Chatbot {
   id: string;
   userId: string;
   modelId: string;
@@ -545,6 +545,7 @@ export interface Agent {
   status: 'active' | 'inactive';
   model: {
     id: string;
+    modelId: string;
     name: string;
     provider: string;
     category: string;
@@ -562,12 +563,12 @@ export interface Guardrail {
   enabled: boolean;
 }
 
-export const agentsApi = {
+export const chatbotsApi = {
   getAll: () =>
-    apiRequest<ApiResponse<{ agents: Agent[] }>>('/agents'),
+    apiRequest<ApiResponse<{ chatbots: Chatbot[] }>>('/chatbots'),
 
   getById: (id: string) =>
-    apiRequest<ApiResponse<{ agent: Agent }>>(`/agents/${id}`),
+    apiRequest<ApiResponse<{ chatbot: Chatbot }>>(`/chatbots/${id}`),
 
   create: (data: {
     name: string;
@@ -578,27 +579,27 @@ export const agentsApi = {
     knowledgeBase?: string[];
     guardrailIds?: string[];
   }) =>
-    apiRequest<ApiResponse<{ agent: Agent }>>('/agents', {
+    apiRequest<ApiResponse<{ chatbot: Chatbot }>>('/chatbots', {
       method: 'POST',
       body: JSON.stringify(data),
     }),
 
-  update: (id: string, data: Partial<Agent>) =>
-    apiRequest<ApiResponse<{ agent: Agent }>>(`/agents/${id}`, {
+  update: (id: string, data: Partial<Chatbot>) =>
+    apiRequest<ApiResponse<{ chatbot: Chatbot }>>(`/chatbots/${id}`, {
       method: 'PUT',
       body: JSON.stringify(data),
     }),
 
   delete: (id: string) =>
-    apiRequest<ApiResponse<void>>(`/agents/${id}`, {
+    apiRequest<ApiResponse<void>>(`/chatbots/${id}`, {
       method: 'DELETE',
     }),
 
   getGuardrails: () =>
-    apiRequest<ApiResponse<{ guardrails: Guardrail[] }>>('/agents/guardrails'),
+    apiRequest<ApiResponse<{ guardrails: Guardrail[] }>>('/chatbots/guardrails'),
 
   getStats: (id: string) =>
-    apiRequest<ApiResponse<{ stats: any }>>(`/agents/${id}/stats`),
+    apiRequest<ApiResponse<{ stats: any }>>(`/chatbots/${id}/stats`),
 };
 
 // ==================== ARTIFACTS API ====================
@@ -673,7 +674,7 @@ export interface AdminStudent {
   batch?: { id: string; name: string };
   _count?: {
     sessions: number;
-    agents: number;
+    chatbots: number;
     artifacts: number;
   };
 }
@@ -732,7 +733,7 @@ export interface AdminAnalytics {
     totalSessions: number;
     totalPrompts: number;
     totalTokensUsed: number;
-    totalAgents?: number;
+    totalChatbots?: number;
   };
   // Time-based analytics
   activeUsers?: {
@@ -755,7 +756,7 @@ export interface AdminAnalytics {
     weekly: number;
     monthly: number;
   };
-  agentsCreated?: {
+  chatbotsCreated?: {
     total: number;
     daily: number;
     weekly: number;
@@ -1255,7 +1256,7 @@ export default {
   models: modelsApi,
   sessions: sessionsApi,
   student: studentApi,
-  agents: agentsApi,
+  chatbots: chatbotsApi,
   artifacts: artifactsApi,
   admin: adminApi,
   comparison: comparisonApi,

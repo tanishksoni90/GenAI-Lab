@@ -167,8 +167,27 @@ export const modelPricing: Record<string, ModelPricing> = {
   },
   
   // Google Models - USD per 1M tokens
-  'gemini-2.0-flash': {
-    id: 'gemini-2.0-flash',
+  // Note: modelId uses 'models/' prefix for Google API
+  'models/gemini-2.5-flash': {
+    id: 'models/gemini-2.5-flash',
+    name: 'Gemini 2.5 Flash',
+    provider: 'Google',
+    category: 'multimodal',
+    pricingType: 'token',
+    inputPer1M: 0.15,
+    outputPer1M: 0.60,
+  },
+  'models/gemini-2.5-pro': {
+    id: 'models/gemini-2.5-pro',
+    name: 'Gemini 2.5 Pro',
+    provider: 'Google',
+    category: 'multimodal',
+    pricingType: 'token',
+    inputPer1M: 1.25,
+    outputPer1M: 5.00,
+  },
+  'models/gemini-2.0-flash': {
+    id: 'models/gemini-2.0-flash',
     name: 'Gemini 2.0 Flash',
     provider: 'Google',
     category: 'multimodal',
@@ -176,23 +195,15 @@ export const modelPricing: Record<string, ModelPricing> = {
     inputPer1M: 0.10,
     outputPer1M: 0.40,
   },
-  'gemini-2.0-flash-lite': {
-    id: 'gemini-2.0-flash-lite',
-    name: 'Gemini 2.0 Flash Lite',
+  'models/gemini-2.0-flash-exp-image-generation': {
+    id: 'models/gemini-2.0-flash-exp-image-generation',
+    name: 'Gemini 2.0 Flash Image',
     provider: 'Google',
-    category: 'multimodal',
-    pricingType: 'token',
-    inputPer1M: 0.075,
-    outputPer1M: 0.30,
-  },
-  'gemini-2.5-flash-lite': {
-    id: 'gemini-2.5-flash-lite',
-    name: 'Gemini 2.5 Flash Lite',
-    provider: 'Google',
-    category: 'multimodal',
-    pricingType: 'token',
-    inputPer1M: 0.075,
-    outputPer1M: 0.30,
+    category: 'image',
+    pricingType: 'per_request',
+    inputPer1M: 0,
+    outputPer1M: 0,
+    requestCost: 0.04, // Per image cost estimate
   },
   
   // Image Models - USD per request
@@ -227,7 +238,18 @@ export function calculateRequestCostUSD(
   outputTokens: number,
   characterCount?: number
 ): number {
-  const pricing = modelPricing[modelId];
+  // Normalize modelId: try exact match first, then with/without 'models/' prefix
+  let pricing = modelPricing[modelId];
+  if (!pricing) {
+    // Try adding 'models/' prefix for Google models
+    if (!modelId.startsWith('models/')) {
+      pricing = modelPricing[`models/${modelId}`];
+    } else {
+      // Try stripping 'models/' prefix
+      pricing = modelPricing[modelId.replace('models/', '')];
+    }
+  }
+  
   if (!pricing) {
     console.warn(`No pricing found for model: ${modelId}`);
     return 0;

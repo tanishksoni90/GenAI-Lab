@@ -44,7 +44,7 @@ const SetupAccount = () => {
       }
 
       try {
-        const response = await fetch(`${API_BASE_URL}/auth/validate-invite?token=${token}`);
+        const response = await fetch(`${API_BASE_URL}/auth/validate-invite?token=${encodeURIComponent(token)}`);
         const data = await response.json();
         
         if (data.success && data.data?.valid) {
@@ -210,16 +210,20 @@ const SetupAccount = () => {
           {/* User info from invite */}
           {inviteData && (
             <div className="p-4 rounded-lg bg-muted/30 border border-primary/10 space-y-2">
-              <div className="flex items-center gap-2 text-sm">
-                <User className="w-4 h-4 text-muted-foreground" />
-                <span className="text-muted-foreground">Name:</span>
-                <span className="font-medium">{inviteData.name}</span>
-              </div>
-              <div className="flex items-center gap-2 text-sm">
-                <Mail className="w-4 h-4 text-muted-foreground" />
-                <span className="text-muted-foreground">Email:</span>
-                <span className="font-medium">{inviteData.email}</span>
-              </div>
+              {inviteData.name && (
+                <div className="flex items-center gap-2 text-sm">
+                  <User className="w-4 h-4 text-muted-foreground" />
+                  <span className="text-muted-foreground">Name:</span>
+                  <span className="font-medium">{inviteData.name}</span>
+                </div>
+              )}
+              {inviteData.email && (
+                <div className="flex items-center gap-2 text-sm">
+                  <Mail className="w-4 h-4 text-muted-foreground" />
+                  <span className="text-muted-foreground">Email:</span>
+                  <span className="font-medium">{inviteData.email}</span>
+                </div>
+              )}
             </div>
           )}
 

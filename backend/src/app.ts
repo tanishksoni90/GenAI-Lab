@@ -10,7 +10,7 @@ import authRoutes from './routes/auth.routes';
 import studentRoutes from './routes/student.routes';
 import modelRoutes from './routes/model.routes';
 import sessionRoutes from './routes/session.routes';
-import agentRoutes from './routes/agent.routes';
+import chatbotRoutes from './routes/chatbot.routes';
 import artifactRoutes from './routes/artifact.routes';
 import adminRoutes from './routes/admin.routes';
 import comparisonRoutes from './routes/comparison.routes';
@@ -60,7 +60,8 @@ app.use(cors({
     if (allowedOrigins.includes(origin) || allowedOrigins.includes('*')) {
       callback(null, true);
     } else {
-      callback(new Error('Not allowed by CORS'));
+      // Return false for proper CORS rejection (not an error/500)
+      callback(null, false);
     }
   },
   credentials: true,
@@ -92,6 +93,12 @@ const aiRateLimiter = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
   // Use user ID from JWT token as key (falls back to IP if not authenticated)
+  // SECURITY NOTE: JWT is decoded but NOT verified here for performance.
+  // This is acceptable because:
+  // 1. IP-based fallback is the primary defense
+  // 2. An attacker crafting fake JWTs still faces IP rate limiting
+  // 3. Full JWT verification on every request would add latency
+  // 4. Authenticated endpoints verify JWT properly via auth middleware
   keyGenerator: (req) => {
     // Extract user ID from Authorization header if present
     const authHeader = req.headers.authorization;
@@ -152,7 +159,7 @@ app.use('/api/auth', authRoutes);
 app.use('/api/students', studentRoutes);
 app.use('/api/models', modelRoutes);
 app.use('/api/sessions', sessionRoutes);
-app.use('/api/agents', agentRoutes);
+app.use('/api/chatbots', chatbotRoutes);
 app.use('/api/artifacts', artifactRoutes);
 app.use('/api/admin', adminRoutes);
 app.use('/api/comparison', comparisonRoutes);

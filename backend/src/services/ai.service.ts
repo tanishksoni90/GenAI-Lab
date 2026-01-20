@@ -289,7 +289,8 @@ const callOpenAI = async (
   modelId: string,
   prompt: string,
   conversationHistory: Array<{ role: string; content: string }>,
-  category: string
+  category: string,
+  systemPrompt?: string
 ): Promise<{ content: string; tokensUsed: number; inputTokens: number; outputTokens: number }> => {
   const client = await getOpenAIClient();
   if (!client) {
@@ -318,13 +319,21 @@ const callOpenAI = async (
   }
 
   // Handle text/chat models with retry
-  const messages: OpenAI.Chat.ChatCompletionMessageParam[] = [
+  const messages: OpenAI.Chat.ChatCompletionMessageParam[] = [];
+  
+  // Add system prompt if provided (chatbot behavior + knowledge base)
+  if (systemPrompt) {
+    messages.push({ role: 'system' as const, content: systemPrompt });
+  }
+  
+  // Add conversation history and current prompt
+  messages.push(
     ...conversationHistory.map(msg => ({
       role: msg.role as 'user' | 'assistant' | 'system',
       content: msg.content,
     })),
-    { role: 'user' as const, content: prompt },
-  ];
+    { role: 'user' as const, content: prompt }
+  );
 
   return withRetry(async () => {
     const response = await client.chat.completions.create({
@@ -348,7 +357,8 @@ const callOpenAI = async (
 const callAnthropic = async (
   modelId: string,
   prompt: string,
-  conversationHistory: Array<{ role: string; content: string }>
+  conversationHistory: Array<{ role: string; content: string }>,
+  systemPrompt?: string
 ): Promise<{ content: string; tokensUsed: number; inputTokens: number; outputTokens: number }> => {
   const client = await getAnthropicClient();
   if (!client) {
@@ -369,6 +379,8 @@ const callAnthropic = async (
       model: modelId,
       max_tokens: DEFAULT_MAX_OUTPUT_TOKENS,
       messages,
+      // Anthropic uses 'system' parameter for system prompt
+      ...(systemPrompt && { system: systemPrompt }),
     });
 
     const content = response.content[0]?.type === 'text' 
@@ -391,7 +403,8 @@ const DEFAULT_MAX_OUTPUT_TOKENS = 1024;
 const callGoogle = async (
   modelId: string,
   prompt: string,
-  conversationHistory: Array<{ role: string; content: string }>
+  conversationHistory: Array<{ role: string; content: string }>,
+  systemPrompt?: string
 ): Promise<{ content: string; tokensUsed: number; inputTokens: number; outputTokens: number }> => {
   const client = await getGoogleClient();
   if (!client) {
@@ -399,11 +412,13 @@ const callGoogle = async (
   }
 
   // Configure model with generation settings including max output tokens
+  // Gemini uses systemInstruction for system prompt
   const model = client.getGenerativeModel({ 
     model: modelId,
     generationConfig: {
       maxOutputTokens: DEFAULT_MAX_OUTPUT_TOKENS,
     },
+    ...(systemPrompt && { systemInstruction: systemPrompt }),
   });
 
   // Build conversation history for Gemini
@@ -784,6 +799,24 @@ export const streamWithModel = async (
   try {
     let result: { tokensUsed: number; inputTokens: number; outputTokens: number };
 
+    // Handle image generation models (DALL-E) - they don't support streaming
+    if (model.category === 'image') {
+      const imageResult = await callOpenAI(model.modelId, prompt, conversationHistory, 'image');
+      onChunk(imageResult.content, true);
+      return {
+        model: {
+          id: model.id,
+          name: model.name,
+          provider: model.provider,
+          category: model.category,
+        },
+        tokensUsed: imageResult.tokensUsed,
+        inputTokens: imageResult.inputTokens,
+        outputTokens: imageResult.outputTokens,
+        isMock: false,
+      };
+    }
+
     switch (model.provider) {
       case 'openai':
         result = await streamOpenAI(model.modelId, prompt, conversationHistory, onChunk);
@@ -848,13 +881,51 @@ export const streamWithModel = async (
   }
 };
 
+// Options for chatWithModel
+interface ChatOptions {
+  systemPrompt?: string;  // Custom system prompt (e.g., chatbot behavior prompt)
+  knowledgeBase?: string[] | string; // Knowledge base content (array or JSON string from DB)
+  strictMode?: boolean;   // If true, emphasize following system prompt strictly
+}
+
 // Chat with AI model (mock or real)
 export const chatWithModel = async (
   modelId: string,
   prompt: string,
-  conversationHistory: Array<{ role: string; content: string }> = []
+  conversationHistory: Array<{ role: string; content: string }> = [],
+  options: ChatOptions = {}
 ) => {
   const model = await getModelById(modelId);
+  const { systemPrompt, knowledgeBase, strictMode } = options;
+
+  // Build system message with chatbot instructions and knowledge base
+  let fullSystemPrompt = '';
+  
+  if (systemPrompt) {
+    fullSystemPrompt = strictMode 
+      ? `IMPORTANT: You MUST strictly follow these instructions. Do NOT deviate from them under any circumstances.\n\n${systemPrompt}`
+      : systemPrompt;
+  }
+  
+  if (knowledgeBase) {
+    // knowledgeBase might be a JSON string from the database or already an array
+    let kbArray: string[] = [];
+    if (typeof knowledgeBase === 'string') {
+      try {
+        kbArray = JSON.parse(knowledgeBase);
+      } catch {
+        // If it's not valid JSON, treat the whole string as a single knowledge item
+        kbArray = [knowledgeBase];
+      }
+    } else if (Array.isArray(knowledgeBase)) {
+      kbArray = knowledgeBase;
+    }
+    
+    if (kbArray.length > 0) {
+      const kbContent = kbArray.join('\n\n---\n\n');
+      fullSystemPrompt += `\n\n## Knowledge Base (Reference this information when relevant):\n${kbContent}`;
+    }
+  }
 
   // Check if real API key is available for this provider (from database)
   const useMock = !(await hasRealApiKey(model.provider));
@@ -885,15 +956,15 @@ export const chatWithModel = async (
 
     switch (model.provider) {
       case 'openai':
-        result = await callOpenAI(model.modelId, prompt, conversationHistory, model.category);
+        result = await callOpenAI(model.modelId, prompt, conversationHistory, model.category, fullSystemPrompt);
         break;
       
       case 'anthropic':
-        result = await callAnthropic(model.modelId, prompt, conversationHistory);
+        result = await callAnthropic(model.modelId, prompt, conversationHistory, fullSystemPrompt);
         break;
       
       case 'google':
-        result = await callGoogle(model.modelId, prompt, conversationHistory);
+        result = await callGoogle(model.modelId, prompt, conversationHistory, fullSystemPrompt);
         break;
       
       case 'elevenlabs':

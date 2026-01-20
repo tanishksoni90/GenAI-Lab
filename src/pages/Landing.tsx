@@ -105,7 +105,7 @@ const Landing = () => {
     },
     {
       icon: Bot,
-      title: "Custom AI Agents",
+      title: "Custom AI Chatbots",
       description: "Create personalized AI assistants with your own knowledge base",
       gradient: "gradient-primary",
       glow: "glow-primary"
@@ -144,7 +144,7 @@ const Landing = () => {
     {
       name: "Sneha Reddy",
       role: "GenAI Enthusiast",
-      content: "Creating custom AI agents with my own knowledge base was a game-changer. Now I have an assistant that knows my study material!",
+      content: "Creating custom AI chatbots with my own knowledge base was a game-changer. Now I have an assistant that knows my study material!",
       avatar: "SR",
       gradient: "gradient-secondary"
     }

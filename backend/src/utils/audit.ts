@@ -88,8 +88,9 @@ export async function logAdminAction(
     });
     
     // Log to console for debugging/monitoring (in production, this could go to a logging service)
+    // Note: Only log userId, not email, to avoid PII in logs (GDPR/CCPA compliance)
     console.log(`[AUDIT] Admin ${adminUserId} performed ${action}:`, {
-      targetUser: details.targetUserEmail || details.targetUserId,
+      targetUserId: details.targetUserId,
       changes: details.changes ? Object.keys(details.changes) : 'N/A',
     });
   } catch (error) {
@@ -107,6 +108,8 @@ export async function logSecurityEvent(
   details: Record<string, unknown>
 ): Promise<void> {
   try {
+    // Note: Events without userId cannot be persisted due to FK constraint
+    // For compliance, consider a separate security_events table without userId FK
     if (userId) {
       await prisma.activityLog.create({
         data: {
@@ -121,7 +124,7 @@ export async function logSecurityEvent(
       });
     }
     
-    // Always log security events to console
+    // Always log security events to console (includes events without userId)
     console.warn(`[SECURITY] ${event}:`, details);
   } catch (error) {
     console.error('[SECURITY] Failed to log security event:', error);
@@ -164,17 +167,25 @@ export async function getAdminAuditLogs(
 /**
  * Get all admin actions affecting a specific user
  */
-export async function getAuditLogsForUser(targetUserId: string) {
+export async function getAuditLogsForUser(
+  targetUserId: string,
+  options: { limit?: number; offset?: number } = {}
+) {
+  const { limit = 50, offset = 0 } = options;
+  
   return prisma.activityLog.findMany({
     where: {
       action: {
         startsWith: 'admin_',
       },
+      // More specific pattern to reduce false positives
       details: {
-        contains: targetUserId,
+        contains: `"targetUserId":"${targetUserId}"`,
       },
     },
     orderBy: { createdAt: 'desc' },
+    take: limit,
+    skip: offset,
     include: {
       user: {
         select: { name: true, email: true },

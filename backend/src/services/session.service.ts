@@ -40,7 +40,7 @@ async function checkTokenAvailability(userId: string): Promise<{ available: bool
 export const createSession = async (
   userId: string,
   modelId: string,
-  agentId?: string
+  chatbotId?: string
 ) => {
   // Verify model exists
   const model = await aiService.getModelById(modelId);
@@ -58,14 +58,14 @@ export const createSession = async (
       data: {
         userId,
         modelId,
-        agentId,
+        chatbotId,
         title: `${model.name} Session`,
       },
       include: {
         model: {
           select: { id: true, name: true, provider: true, category: true },
         },
-        agent: {
+        chatbot: {
           select: { id: true, name: true, behaviorPrompt: true },
         },
       },
@@ -76,7 +76,7 @@ export const createSession = async (
       data: {
         userId,
         action: 'session_start',
-        details: JSON.stringify({ sessionId: newSession.id, modelId, agentId }),
+        details: JSON.stringify({ sessionId: newSession.id, modelId, chatbotId }),
       },
     });
 
@@ -94,7 +94,7 @@ export const getSession = async (sessionId: string, userId: string) => {
       model: {
         select: { id: true, name: true, provider: true, category: true },
       },
-      agent: {
+      chatbot: {
         select: { id: true, name: true },
       },
       messages: {
@@ -124,17 +124,17 @@ export const getUserSessions = async (
     page?: number;
     limit?: number;
     modelId?: string;
-    agentId?: string;
+    chatbotId?: string;
   } = {}
 ) => {
   // Enforce maximum limit to prevent memory issues
-  const { page = 1, modelId, agentId } = options;
+  const { page = 1, modelId, chatbotId } = options;
   const limit = Math.min(options.limit || 20, MAX_PAGE_LIMIT);
   const skip = (page - 1) * limit;
 
   const where: any = { userId };
   if (modelId) where.modelId = modelId;
-  if (agentId) where.agentId = agentId;
+  if (chatbotId) where.chatbotId = chatbotId;
 
   const [sessions, total] = await Promise.all([
     prisma.session.findMany({
@@ -146,7 +146,7 @@ export const getUserSessions = async (
         model: {
           select: { id: true, name: true, provider: true, category: true },
         },
-        agent: {
+        chatbot: {
           select: { id: true, name: true },
         },
         _count: {
@@ -174,7 +174,7 @@ export const sendMessage = async (
     where: { id: sessionId },
     include: {
       model: true,
-      agent: true,
+      chatbot: true,
       messages: {
         orderBy: { createdAt: 'asc' },
       },
@@ -204,11 +204,19 @@ export const sendMessage = async (
   // Score the user's prompt using Gemini AI (cost deducted from budget, not shown in session)
   const scoreResult = await scoringService.scorePrompt(sanitizedContent, conversationHistory, userId);
 
-  // Get AI response
+  // Build chatbot options if this is a chatbot session
+  const chatOptions = session.chatbot ? {
+    systemPrompt: session.chatbot.behaviorPrompt || undefined,
+    knowledgeBase: session.chatbot.knowledgeBase || undefined,
+    strictMode: session.chatbot.strictMode || false,
+  } : {};
+
+  // Get AI response (with chatbot instructions if applicable)
   const aiResponse = await aiService.chatWithModel(
     session.modelId,
     sanitizedContent,
-    conversationHistory
+    conversationHistory,
+    chatOptions
   );
 
   // Calculate cost in USD using actual token counts from API
@@ -313,10 +321,10 @@ export const sendMessage = async (
       },
     });
 
-    // Update agent stats if applicable
-    if (session.agentId) {
-      await tx.agent.update({
-        where: { id: session.agentId },
+    // Update chatbot stats if applicable
+    if (session.chatbotId) {
+      await tx.chatbot.update({
+        where: { id: session.chatbotId },
         data: {
           messagesCount: { increment: 2 }, // user + assistant
           tokensUsed: { increment: aiResponse.tokensUsed },
@@ -435,7 +443,7 @@ export const sendMessageStreaming = async (
     where: { id: sessionId },
     include: {
       model: true,
-      agent: true,
+      chatbot: true,
       messages: {
         orderBy: { createdAt: 'asc' },
       },
@@ -472,9 +480,8 @@ export const sendMessageStreaming = async (
     sanitizedContent,
     conversationHistory,
     (chunk: string, done: boolean) => {
-      if (!done) {
-        fullResponse += chunk;
-      }
+      // Always accumulate chunks (including error messages sent with done=true)
+      fullResponse += chunk;
       onChunk(chunk, done);
     }
   );

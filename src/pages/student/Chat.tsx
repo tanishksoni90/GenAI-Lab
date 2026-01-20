@@ -748,12 +748,12 @@ const StudentChat = () => {
           </div>
         </ScrollArea>
 
-        {/* Token Balance */}
+        {/* Learning Credits */}
         <div className="p-4 border-t border-white/5 space-y-3">
           <div className="glass p-3 rounded-xl">
             <div className="flex items-center justify-between mb-2">
               <span className="text-xs text-muted-foreground flex items-center gap-1">
-                <Zap className="w-3 h-3" /> Token Balance
+                <Zap className="w-3 h-3" /> Learning Credits
               </span>
               <span className={`text-xs font-semibold ${stats.tokenBalance < 5000 ? 'text-orange-400' : 'text-blue-400'}`}>
                 {stats.tokenBalance.toLocaleString()}

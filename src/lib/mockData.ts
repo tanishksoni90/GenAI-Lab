@@ -288,7 +288,7 @@ export const mockEnrolledCourses: Course[] = [
   }
 ];
 
-// AI Agents & Guardrails
+// AI Chatbots & Guardrails
 export interface Guardrail {
   id: string;
   type: "educational-integrity" | "content-safety" | "behavioral" | "custom";
@@ -300,7 +300,7 @@ export interface Guardrail {
   enabled?: boolean;
 }
 
-export interface AIAgent {
+export interface AIChatbot {
   id: string;
   name: string;
   description: string;
@@ -342,11 +342,11 @@ export const mockAdmins = [
   { id: "2", name: "Sarah Manager", email: "sarah@university.edu", role: "Course Manager" },
 ];
 
-export const mockAIAgents: AIAgent[] = [
+export const mockAIChatbots: AIChatbot[] = [
   {
     id: "1",
     name: "Python Tutor",
-    description: "Specialized agent for learning Python programming with step-by-step guidance",
+    description: "Specialized chatbot for learning Python programming with step-by-step guidance",
     modelId: "1",
     modelName: "GPT-4",
     guardrails: [mockGuardrails[0], mockGuardrails[1]],

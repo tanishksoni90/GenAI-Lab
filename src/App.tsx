@@ -15,7 +15,7 @@ import SetNewPassword from "./pages/student/SetNewPassword";
 import Compare from "./pages/student/Compare";
 import StudentDashboard from "./pages/student/Dashboard";
 import StudentChat from "./pages/student/Chat";
-import AgentChat from "./pages/student/AgentChat";
+import ChatbotChat from "./pages/student/ChatbotChat";
 import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient({
@@ -45,7 +45,7 @@ const App = () => (
               <Route path="/student/set-new-password" element={<SetNewPassword />} />
               <Route path="/student/dashboard" element={<StudentDashboard />} />
               <Route path="/student/chat/:modelId" element={<StudentChat />} />
-              <Route path="/student/agent-chat/:agentId" element={<AgentChat />} />
+              <Route path="/student/chatbot-chat/:chatbotId" element={<ChatbotChat />} />
               <Route path="/student/compare" element={<Compare />} />
               {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
               <Route path="*" element={<NotFound />} />

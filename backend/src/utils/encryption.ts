@@ -18,11 +18,17 @@ const IV_LENGTH = 16; // 128 bits
 const AUTH_TAG_LENGTH = 16; // 128 bits
 const KEY_LENGTH = 32; // 256 bits
 
+// Cache the encryption key to avoid repeated computation and log spam
+let cachedKey: Buffer | null = null;
+let devWarningLogged = false;
+
 /**
  * Get the encryption key from environment or generate a development key
  * In production, ENCRYPTION_KEY MUST be set
  */
 function getEncryptionKey(): Buffer {
+  if (cachedKey) return cachedKey;
+  
   const envKey = process.env.ENCRYPTION_KEY;
   const isProduction = process.env.NODE_ENV === 'production';
   
@@ -36,16 +42,28 @@ function getEncryptionKey(): Buffer {
     // Decode base64 key from environment
     const keyBuffer = Buffer.from(envKey, 'base64');
     if (keyBuffer.length < KEY_LENGTH) {
-      // If key is too short, hash it to get correct length
-      return crypto.createHash('sha256').update(envKey).digest();
+      console.error(`ENCRYPTION_KEY is too short (${keyBuffer.length} bytes). Expected at least ${KEY_LENGTH} bytes.`);
+      console.error('Generate a proper key with: openssl rand -base64 32');
+      if (isProduction) {
+        process.exit(1);
+      }
+      // In non-production, derive key but warn about security risk
+      console.warn('WARNING: Deriving key from weak input. NOT SECURE!');
+      cachedKey = crypto.createHash('sha256').update(envKey).digest();
+      return cachedKey;
     }
-    return keyBuffer.slice(0, KEY_LENGTH);
+    cachedKey = keyBuffer.slice(0, KEY_LENGTH);
+    return cachedKey;
   }
   
   // Development-only: derive key from a fixed string (NOT SECURE FOR PRODUCTION)
   // This allows development to work without setting ENCRYPTION_KEY
-  console.warn('WARNING: Using development encryption key. Set ENCRYPTION_KEY in production!');
-  return crypto.createHash('sha256').update('dev-encryption-key-not-for-production').digest();
+  if (!devWarningLogged) {
+    console.warn('WARNING: Using development encryption key. Set ENCRYPTION_KEY in production!');
+    devWarningLogged = true;
+  }
+  cachedKey = crypto.createHash('sha256').update('dev-encryption-key-not-for-production').digest();
+  return cachedKey;
 }
 
 /**
@@ -72,6 +90,18 @@ export function encrypt(plaintext: string): string {
 /**
  * Decrypt sensitive data
  * Expects string in format: iv:authTag:encryptedData (all base64)
+ * 
+ * @param encryptedString - The encrypted string or legacy plain text
+ * @returns The decrypted value, or the original string if:
+ *   - Not in encrypted format (legacy plain text) - returned as-is for backward compatibility
+ *   - Decryption fails (key rotation, corruption, tampering) - returns original to prevent
+ *     breaking existing functionality during migration, but logs warning
+ * 
+ * @note IMPORTANT: Callers cannot distinguish between successfully decrypted plaintext
+ *       and failed decryption returning ciphertext. If this is critical for your use case,
+ *       use isEncrypted() to verify format first, or check if the returned value still
+ *       looks encrypted (contains ':' separators). Consider migrating to a null-returning
+ *       variant for strict decryption requirements.
  */
 export function decrypt(encryptedString: string): string {
   if (!encryptedString) return '';
@@ -98,9 +128,11 @@ export function decrypt(encryptedString: string): string {
     
     return decrypted;
   } catch (error) {
-    // If decryption fails, it might be plain text (legacy)
-    // or the encryption key changed
-    console.error('Decryption failed, returning original value:', error);
+    // Decryption failed - could be legacy plain text that happens to have colons,
+    // or the encryption key changed. Don't log error details (may contain sensitive info).
+    console.error('Decryption failed for value with encrypted format. Key may have changed or data is corrupted.');
+    // Return original for backward compatibility with legacy unencrypted data
+    // Note: This is a security trade-off for migration support
     return encryptedString;
   }
 }

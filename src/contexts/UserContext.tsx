@@ -40,10 +40,10 @@ export interface Session {
   createdAt: Date;
   updatedAt: Date;
   messages: ChatMessage[];
-  // Agent-specific fields
-  isAgentSession?: boolean;
-  agentId?: string;
-  agentName?: string;
+  // Chatbot-specific fields
+  isChatbotSession?: boolean;
+  chatbotId?: string;
+  chatbotName?: string;
 }
 
 export interface Artifact {
@@ -65,7 +65,7 @@ export interface Notification {
   createdAt: Date;
 }
 
-export interface AgentGuardrail {
+export interface ChatbotGuardrail {
   id: string;
   type: 'educational-integrity' | 'content-safety' | 'behavioral' | 'custom';
   title: string;
@@ -74,13 +74,13 @@ export interface AgentGuardrail {
   priority: number;
 }
 
-export interface AIAgent {
+export interface AIChatbot {
   id: string;
   name: string;
   description: string;
   modelId: string;
   modelName: string;
-  guardrails: AgentGuardrail[];
+  guardrails: ChatbotGuardrail[];
   behaviorPrompt: string;
   strictMode: boolean;
   knowledgeBaseFiles: string[];
@@ -119,7 +119,7 @@ export interface UserStats {
   totalTokensUsed: number;
   totalSessions: number;
   todayModelSessions: number; // Only model sessions today
-  totalAgentsCreated: number; // Total AI agents created
+  totalChatbotsCreated: number; // Total AI chatbots created
   weeklyPrompts: number;
   totalPrompts: number;
   totalScore: number;
@@ -143,7 +143,7 @@ interface UserState {
   sessions: Session[];
   artifacts: Artifact[];
   notifications: Notification[];
-  agents: AIAgent[];
+  chatbots: AIChatbot[];
   
   // Auth actions
   registerUser: (profile: Omit<UserProfile, 'createdAt'>) => { success: boolean; error?: string };
@@ -153,20 +153,20 @@ interface UserState {
   
   // Session actions
   createSession: (modelId: string, modelName: string, modelCategory: 'text' | 'image' | 'audio') => Session;
-  createAgentSession: (agentId: string) => Session | null;
+  createChatbotSession: (chatbotId: string) => Session | null;
   getSession: (sessionId: string) => Session | undefined;
   updateSessionTitle: (sessionId: string, title: string) => void;
   addMessageToSession: (sessionId: string, message: ChatMessage, tokens: number, score?: number) => void;
   getSessionMessages: (sessionId: string) => ChatMessage[];
   getModelSessions: () => Session[]; // Only model sessions for overview
-  getAgentSessions: (agentId: string) => Session[]; // Sessions for specific agent
+  getChatbotSessions: (chatbotId: string) => Session[]; // Sessions for specific chatbot
   
-  // Agent actions
-  createAgent: (agent: Omit<AIAgent, 'id' | 'createdAt' | 'updatedAt' | 'sessionsCount' | 'messagesCount' | 'artifactsCount' | 'tokensUsed'>) => AIAgent;
-  updateAgent: (agentId: string, updates: Partial<AIAgent>) => void;
-  deleteAgent: (agentId: string) => void;
-  getAgent: (agentId: string) => AIAgent | undefined;
-  incrementAgentUsage: (agentId: string, tokens: number, messages?: number, artifacts?: number) => void;
+  // Chatbot actions
+  createChatbot: (chatbot: Omit<AIChatbot, 'id' | 'createdAt' | 'updatedAt' | 'sessionsCount' | 'messagesCount' | 'artifactsCount' | 'tokensUsed'>) => AIChatbot;
+  updateChatbot: (chatbotId: string, updates: Partial<AIChatbot>) => void;
+  deleteChatbot: (chatbotId: string) => void;
+  getChatbot: (chatbotId: string) => AIChatbot | undefined;
+  incrementChatbotUsage: (chatbotId: string, tokens: number, messages?: number, artifacts?: number) => void;
   
   // Artifact actions
   createArtifact: (artifact: Omit<Artifact, 'id' | 'createdAt'>) => Artifact;
@@ -193,7 +193,7 @@ const defaultStats: UserStats = {
   totalTokensUsed: 0,
   totalSessions: 0,
   todayModelSessions: 0,
-  totalAgentsCreated: 0,
+  totalChatbotsCreated: 0,
   weeklyPrompts: 0,
   totalPrompts: 0,
   totalScore: 0,
@@ -224,7 +224,7 @@ const getStorageKeys = (userId: string) => ({
   sessions: `genai_${userId}_sessions`,
   artifacts: `genai_${userId}_artifacts`,
   notifications: `genai_${userId}_notifications`,
-  agents: `genai_${userId}_agents`,
+  chatbots: `genai_${userId}_chatbots`,
 });
 
 const CURRENT_USER_KEY = 'genai_current_user';
@@ -383,10 +383,10 @@ export const UserProvider: React.FC<{ children: React.ReactNode }> = ({ children
     return [];
   });
 
-  const [agents, setAgents] = useState<AIAgent[]>(() => {
+  const [chatbots, setChatbots] = useState<AIChatbot[]>(() => {
     if (!currentUserId) return [];
     const keys = getStorageKeys(currentUserId);
-    const stored = localStorage.getItem(keys.agents);
+    const stored = localStorage.getItem(keys.chatbots);
     if (stored) {
       return JSON.parse(stored).map((a: any) => ({
         ...a,
@@ -427,7 +427,7 @@ export const UserProvider: React.FC<{ children: React.ReactNode }> = ({ children
     localStorage.setItem(keys.sessions, JSON.stringify([]));
     localStorage.setItem(keys.artifacts, JSON.stringify([]));
     localStorage.setItem(keys.notifications, JSON.stringify([]));
-    localStorage.setItem(keys.agents, JSON.stringify([]));
+    localStorage.setItem(keys.chatbots, JSON.stringify([]));
     
     // Set as current user
     localStorage.setItem(CURRENT_USER_KEY, userId);
@@ -437,7 +437,7 @@ export const UserProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setSessions([]);
     setArtifacts([]);
     setNotifications([]);
-    setAgents([]);
+    setChatbots([]);
     setIsAuthenticated(true);
     
     return { success: true };
@@ -489,8 +489,8 @@ export const UserProvider: React.FC<{ children: React.ReactNode }> = ({ children
       createdAt: new Date(n.createdAt),
     })) : []);
     
-    const storedAgents = localStorage.getItem(keys.agents);
-    setAgents(storedAgents ? JSON.parse(storedAgents).map((a: any) => ({
+    const storedChatbots = localStorage.getItem(keys.chatbots);
+    setChatbots(storedChatbots ? JSON.parse(storedChatbots).map((a: any) => ({
       ...a,
       createdAt: new Date(a.createdAt),
       updatedAt: new Date(a.updatedAt),
@@ -541,8 +541,8 @@ export const UserProvider: React.FC<{ children: React.ReactNode }> = ({ children
       createdAt: new Date(n.createdAt),
     })) : []);
     
-    const storedAgents = localStorage.getItem(keys.agents);
-    setAgents(storedAgents ? JSON.parse(storedAgents).map((a: any) => ({
+    const storedChatbots = localStorage.getItem(keys.chatbots);
+    setChatbots(storedChatbots ? JSON.parse(storedChatbots).map((a: any) => ({
       ...a,
       createdAt: new Date(a.createdAt),
       updatedAt: new Date(a.updatedAt),
@@ -558,7 +558,7 @@ export const UserProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setSessions([]);
     setArtifacts([]);
     setNotifications([]);
-    setAgents([]);
+    setChatbots([]);
     setIsAuthenticated(false);
   }, []);
 
@@ -590,16 +590,16 @@ export const UserProvider: React.FC<{ children: React.ReactNode }> = ({ children
   useEffect(() => {
     if (!currentUserId) return;
     const keys = getStorageKeys(currentUserId);
-    localStorage.setItem(keys.agents, JSON.stringify(agents));
-  }, [agents, currentUserId]);
+    localStorage.setItem(keys.chatbots, JSON.stringify(chatbots));
+  }, [chatbots, currentUserId]);
 
   // Refresh stats calculations - FIXED avg score calculation
   const refreshStats = useCallback(() => {
     setSessions(currentSessions => {
-      // Only count model sessions (not agent sessions) for today
-      const todayModelSessions = currentSessions.filter(s => isToday(s.createdAt) && !s.isAgentSession).length;
+      // Only count model sessions (not chatbot sessions) for today
+      const todayModelSessions = currentSessions.filter(s => isToday(s.createdAt) && !s.isChatbotSession).length;
       
-      // Count ALL prompts this week (model + agent)
+      // Count ALL prompts this week (model + chatbot)
       const weeklyPrompts = currentSessions
         .filter(s => isThisWeek(s.createdAt))
         .reduce((acc, s) => {
@@ -607,7 +607,7 @@ export const UserProvider: React.FC<{ children: React.ReactNode }> = ({ children
           return acc + userMessages;
         }, 0);
       
-      // Calculate total prompts and scores across ALL sessions (model + agent)
+      // Calculate total prompts and scores across ALL sessions (model + chatbot)
       let totalPrompts = 0;
       let totalScore = 0;
       let scoredPrompts = 0;
@@ -635,7 +635,7 @@ export const UserProvider: React.FC<{ children: React.ReactNode }> = ({ children
           ...prev,
           totalSessions: currentSessions.length,
           todayModelSessions,
-          totalAgentsCreated: agents.length,
+          totalChatbotsCreated: chatbots.length,
           weeklyPrompts,
           totalPrompts,
           totalScore,
@@ -649,13 +649,13 @@ export const UserProvider: React.FC<{ children: React.ReactNode }> = ({ children
       
       return currentSessions;
     });
-  }, [agents.length]);
+  }, [chatbots.length]);
 
   useEffect(() => {
     refreshStats();
-  }, [sessions.length, agents.length]);
+  }, [sessions.length, chatbots.length]);
 
-  // Create a new MODEL session (not agent)
+  // Create a new MODEL session (not chatbot)
   const createSession = useCallback((modelId: string, modelName: string, modelCategory: 'text' | 'image' | 'audio'): Session => {
     const newSession: Session = {
       id: `session-${Date.now()}`,
@@ -671,13 +671,13 @@ export const UserProvider: React.FC<{ children: React.ReactNode }> = ({ children
       createdAt: new Date(),
       updatedAt: new Date(),
       messages: [],
-      isAgentSession: false,
+      isChatbotSession: false,
     };
     
     setSessions(prev => [newSession, ...prev]);
     recordActivity();
     
-    const todaySessionCount = sessions.filter(s => isToday(s.createdAt) && !s.isAgentSession).length;
+    const todaySessionCount = sessions.filter(s => isToday(s.createdAt) && !s.isChatbotSession).length;
     if (todaySessionCount === 0) {
       const streak = calculateStreak([...stats.activeDays, getTodayString()]);
       if (streak > 0) {
@@ -692,17 +692,17 @@ export const UserProvider: React.FC<{ children: React.ReactNode }> = ({ children
     return newSession;
   }, [sessions, stats.activeDays]);
 
-  // Create a new AGENT session
-  const createAgentSession = useCallback((agentId: string): Session | null => {
-    const agent = agents.find(a => a.id === agentId);
-    if (!agent) return null;
+  // Create a new CHATBOT session
+  const createChatbotSession = useCallback((chatbotId: string): Session | null => {
+    const chatbot = chatbots.find(a => a.id === chatbotId);
+    if (!chatbot) return null;
     
     const newSession: Session = {
-      id: `agent-session-${Date.now()}`,
-      modelId: agent.modelId,
-      modelName: agent.modelName,
+      id: `chatbot-session-${Date.now()}`,
+      modelId: chatbot.modelId,
+      modelName: chatbot.modelName,
       modelCategory: 'text',
-      title: `New ${agent.name} Chat`,
+      title: `New ${chatbot.name} Chat`,
       messageCount: 0,
       tokensUsed: 0,
       totalScore: 0,
@@ -711,31 +711,31 @@ export const UserProvider: React.FC<{ children: React.ReactNode }> = ({ children
       createdAt: new Date(),
       updatedAt: new Date(),
       messages: [],
-      isAgentSession: true,
-      agentId: agent.id,
-      agentName: agent.name,
+      isChatbotSession: true,
+      chatbotId: chatbot.id,
+      chatbotName: chatbot.name,
     };
     
     setSessions(prev => [newSession, ...prev]);
     
-    // Increment agent session count
-    setAgents(prev => prev.map(a => 
-      a.id === agentId ? { ...a, sessionsCount: a.sessionsCount + 1, updatedAt: new Date() } : a
+    // Increment chatbot session count
+    setChatbots(prev => prev.map(a => 
+      a.id === chatbotId ? { ...a, sessionsCount: a.sessionsCount + 1, updatedAt: new Date() } : a
     ));
     
     recordActivity();
     
     return newSession;
-  }, [agents]);
+  }, [chatbots]);
 
   // Get only MODEL sessions (for overview recent sessions)
   const getModelSessions = useCallback((): Session[] => {
-    return sessions.filter(s => !s.isAgentSession);
+    return sessions.filter(s => !s.isChatbotSession);
   }, [sessions]);
 
-  // Get sessions for specific agent
-  const getAgentSessions = useCallback((agentId: string): Session[] => {
-    return sessions.filter(s => s.isAgentSession && s.agentId === agentId);
+  // Get sessions for specific chatbot
+  const getChatbotSessions = useCallback((chatbotId: string): Session[] => {
+    return sessions.filter(s => s.isChatbotSession && s.chatbotId === chatbotId);
   }, [sessions]);
 
   const getSession = useCallback((sessionId: string): Session | undefined => {
@@ -770,10 +770,10 @@ export const UserProvider: React.FC<{ children: React.ReactNode }> = ({ children
         newTitle = message.content.slice(0, 50) + (message.content.length > 50 ? '...' : '');
       }
       
-      // If agent session, update agent stats
-      if (s.isAgentSession && s.agentId) {
-        setAgents(prevAgents => prevAgents.map(a => 
-          a.id === s.agentId ? { 
+      // If chatbot session, update chatbot stats
+      if (s.isChatbotSession && s.chatbotId) {
+        setChatbots(prevChatbots => prevChatbots.map(a => 
+          a.id === s.chatbotId ? { 
             ...a, 
             messagesCount: a.messagesCount + 1,
             tokensUsed: a.tokensUsed + tokens,
@@ -801,11 +801,11 @@ export const UserProvider: React.FC<{ children: React.ReactNode }> = ({ children
     return session?.messages || [];
   }, [sessions]);
 
-  // Agent actions
-  const createAgent = useCallback((agentData: Omit<AIAgent, 'id' | 'createdAt' | 'updatedAt' | 'sessionsCount' | 'messagesCount' | 'artifactsCount' | 'tokensUsed'>): AIAgent => {
-    const newAgent: AIAgent = {
-      ...agentData,
-      id: `agent-${Date.now()}`,
+  // Chatbot actions
+  const createChatbot = useCallback((chatbotData: Omit<AIChatbot, 'id' | 'createdAt' | 'updatedAt' | 'sessionsCount' | 'messagesCount' | 'artifactsCount' | 'tokensUsed'>): AIChatbot => {
+    const newChatbot: AIChatbot = {
+      ...chatbotData,
+      id: `chatbot-${Date.now()}`,
       sessionsCount: 0,
       messagesCount: 0,
       artifactsCount: 0,
@@ -814,41 +814,41 @@ export const UserProvider: React.FC<{ children: React.ReactNode }> = ({ children
       updatedAt: new Date(),
     };
     
-    setAgents(prev => [newAgent, ...prev]);
+    setChatbots(prev => [newChatbot, ...prev]);
     
     addNotification({
       type: 'success',
-      title: 'Agent Created',
-      message: `"${agentData.name}" is ready to use.`,
+      title: 'Chatbot Created',
+      message: `"${chatbotData.name}" is ready to use.`,
     });
     
-    return newAgent;
+    return newChatbot;
   }, []);
 
-  const updateAgent = useCallback((agentId: string, updates: Partial<AIAgent>) => {
-    setAgents(prev => prev.map(a => 
-      a.id === agentId ? { ...a, ...updates, updatedAt: new Date() } : a
+  const updateChatbot = useCallback((chatbotId: string, updates: Partial<AIChatbot>) => {
+    setChatbots(prev => prev.map(a => 
+      a.id === chatbotId ? { ...a, ...updates, updatedAt: new Date() } : a
     ));
   }, []);
 
-  const deleteAgent = useCallback((agentId: string) => {
-    // Also delete agent sessions
-    setSessions(prev => prev.filter(s => s.agentId !== agentId));
-    setAgents(prev => prev.filter(a => a.id !== agentId));
+  const deleteChatbot = useCallback((chatbotId: string) => {
+    // Also delete chatbot sessions
+    setSessions(prev => prev.filter(s => s.chatbotId !== chatbotId));
+    setChatbots(prev => prev.filter(a => a.id !== chatbotId));
     addNotification({
       type: 'info',
-      title: 'Agent Deleted',
-      message: 'The agent and its sessions have been permanently removed.',
+      title: 'Chatbot Deleted',
+      message: 'The chatbot and its sessions have been permanently removed.',
     });
   }, []);
 
-  const getAgent = useCallback((agentId: string): AIAgent | undefined => {
-    return agents.find(a => a.id === agentId);
-  }, [agents]);
+  const getChatbot = useCallback((chatbotId: string): AIChatbot | undefined => {
+    return chatbots.find(a => a.id === chatbotId);
+  }, [chatbots]);
 
-  const incrementAgentUsage = useCallback((agentId: string, tokens: number, messages: number = 0, artifacts: number = 0) => {
-    setAgents(prev => prev.map(a => {
-      if (a.id !== agentId) return a;
+  const incrementChatbotUsage = useCallback((chatbotId: string, tokens: number, messages: number = 0, artifacts: number = 0) => {
+    setChatbots(prev => prev.map(a => {
+      if (a.id !== chatbotId) return a;
       return {
         ...a,
         tokensUsed: a.tokensUsed + tokens,
@@ -1013,24 +1013,24 @@ export const UserProvider: React.FC<{ children: React.ReactNode }> = ({ children
     sessions,
     artifacts,
     notifications,
-    agents,
+    chatbots,
     registerUser,
     loginUser,
     setCurrentUser,
     clearUserData,
     createSession,
-    createAgentSession,
+    createChatbotSession,
     getSession,
     updateSessionTitle,
     addMessageToSession,
     getSessionMessages,
     getModelSessions,
-    getAgentSessions,
-    createAgent,
-    updateAgent,
-    deleteAgent,
-    getAgent,
-    incrementAgentUsage,
+    getChatbotSessions,
+    createChatbot,
+    updateChatbot,
+    deleteChatbot,
+    getChatbot,
+    incrementChatbotUsage,
     createArtifact,
     deleteArtifact,
     addNotification,
