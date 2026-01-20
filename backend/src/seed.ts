@@ -100,10 +100,49 @@ async function main() {
     
     // ==================== Google Models ====================
     // Source: https://ai.google.dev/pricing
+    // Note: modelId must use 'models/' prefix for Google API
     prisma.aIModel.upsert({
-      where: { provider_modelId: { provider: 'google', modelId: 'gemini-2.0-flash' } },
+      where: { provider_modelId: { provider: 'google', modelId: 'models/gemini-2.5-flash' } },
       update: {
-        description: "Gemini 2.0 Flash is Google DeepMind's fast, high-performing multimodal model. Delivers low-latency responses and native tool usage. Ideal for real-time agentic applications.",
+        description: "Gemini 2.5 Flash - Google's latest fast model with enhanced reasoning capabilities. Optimized for speed and efficiency.",
+        maxTokens: 1048576,
+        inputCost: 0.00015,  // $0.15/1M
+        outputCost: 0.0006,  // $0.60/1M
+      },
+      create: {
+        name: 'Gemini 2.5 Flash',
+        provider: 'google',
+        modelId: 'models/gemini-2.5-flash',
+        category: 'text',
+        description: "Gemini 2.5 Flash - Google's latest fast model with enhanced reasoning capabilities. Optimized for speed and efficiency.",
+        inputCost: 0.00015,  // $0.15/1M = $0.00015/1K
+        outputCost: 0.0006,  // $0.60/1M = $0.0006/1K
+        maxTokens: 1048576,
+      },
+    }),
+    prisma.aIModel.upsert({
+      where: { provider_modelId: { provider: 'google', modelId: 'models/gemini-2.5-pro' } },
+      update: {
+        description: "Gemini 2.5 Pro - Google's most capable model for complex reasoning, coding, and analysis tasks. Best for advanced use cases.",
+        maxTokens: 1048576,
+        inputCost: 0.00125,  // $1.25/1M
+        outputCost: 0.005,   // $5.00/1M
+      },
+      create: {
+        name: 'Gemini 2.5 Pro',
+        provider: 'google',
+        modelId: 'models/gemini-2.5-pro',
+        category: 'text',
+        description: "Gemini 2.5 Pro - Google's most capable model for complex reasoning, coding, and analysis tasks. Best for advanced use cases.",
+        inputCost: 0.00125,  // $1.25/1M = $0.00125/1K
+        outputCost: 0.005,   // $5.00/1M = $0.005/1K
+        maxTokens: 1048576,
+      },
+    }),
+    prisma.aIModel.upsert({
+      where: { provider_modelId: { provider: 'google', modelId: 'models/gemini-2.0-flash' } },
+      update: {
+        description: "Gemini 2.0 Flash - Fast, high-performing multimodal model. Delivers low-latency responses. Ideal for real-time applications.",
         maxTokens: 1000000,
         inputCost: 0.0001,   // $0.10/1M
         outputCost: 0.0004,  // $0.40/1M
@@ -111,50 +150,33 @@ async function main() {
       create: {
         name: 'Gemini 2.0 Flash',
         provider: 'google',
-        modelId: 'gemini-2.0-flash',
+        modelId: 'models/gemini-2.0-flash',
         category: 'text',
-        description: "Gemini 2.0 Flash is Google DeepMind's fast, high-performing multimodal model. Delivers low-latency responses and native tool usage. Ideal for real-time agentic applications.",
+        description: "Gemini 2.0 Flash - Fast, high-performing multimodal model. Delivers low-latency responses. Ideal for real-time applications.",
         inputCost: 0.0001,   // $0.10/1M = $0.0001/1K
         outputCost: 0.0004,  // $0.40/1M = $0.0004/1K
         maxTokens: 1000000,
       },
     }),
     prisma.aIModel.upsert({
-      where: { provider_modelId: { provider: 'google', modelId: 'gemini-2.5-flash-preview-05-20' } },
+      where: { provider_modelId: { provider: 'google', modelId: 'models/gemini-2.0-flash-exp-image-generation' } },
       update: {
-        description: "Gemini 2.5 Flash Preview - latest experimental model with enhanced reasoning capabilities. 1M token context window.",
-        maxTokens: 1048576,
-        inputCost: 0.00015,  // $0.15/1M
-        outputCost: 0.0006,  // $0.60/1M
+        description: "Gemini 2.0 Flash Image Generation - Experimental model for AI image generation. Creates images from text prompts.",
+        maxTokens: 0,
+        inputCost: 0.04,   // Per image cost estimate - verify actual pricing
+        outputCost: 0,
       },
       create: {
-        name: 'Gemini 2.5 Flash Preview',
+        name: 'Gemini 2.0 Flash Image',
         provider: 'google',
-        modelId: 'gemini-2.5-flash-preview-05-20',
-        category: 'text',
-        description: "Gemini 2.5 Flash Preview - latest experimental model with enhanced reasoning capabilities. 1M token context window.",
-        inputCost: 0.00015,  // $0.15/1M = $0.00015/1K
-        outputCost: 0.0006,  // $0.60/1M = $0.0006/1K
-        maxTokens: 1048576,
-      },
-    }),
-    prisma.aIModel.upsert({
-      where: { provider_modelId: { provider: 'google', modelId: 'gemini-1.5-flash' } },
-      update: {
-        description: "Gemini 1.5 Flash - fast and versatile multimodal model for diverse tasks. 1M token context window.",
-        maxTokens: 1000000,
-        inputCost: 0.000075, // $0.075/1M
-        outputCost: 0.0003,  // $0.30/1M
-      },
-      create: {
-        name: 'Gemini 1.5 Flash',
-        provider: 'google',
-        modelId: 'gemini-1.5-flash',
-        category: 'text',
-        description: "Gemini 1.5 Flash - fast and versatile multimodal model for diverse tasks. 1M token context window.",
-        inputCost: 0.000075, // $0.075/1M = $0.000075/1K
-        outputCost: 0.0003,  // $0.30/1M = $0.0003/1K
-        maxTokens: 1000000,
+        modelId: 'models/gemini-2.0-flash-exp-image-generation',
+        // NOTE: This is an experimental model ("exp" in name). May be deprecated or changed without notice.
+        // Pricing is estimated - verify actual per-image cost from Google's API pricing page.
+        category: 'image',
+        description: "Gemini 2.0 Flash Image Generation - Experimental model for AI image generation. Creates images from text prompts.",
+        inputCost: 0.04,   // Per image cost estimate - verify actual pricing
+        outputCost: 0,
+        maxTokens: 0,
       },
     }),
     

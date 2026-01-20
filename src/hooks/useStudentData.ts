@@ -7,12 +7,12 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { 
   studentApi, 
   sessionsApi, 
-  agentsApi, 
+  chatbotsApi, 
   artifactsApi,
   modelsApi,
   DashboardStats,
   Session,
-  Agent,
+  Chatbot,
   Artifact,
   LeaderboardEntry,
   AIModel,
@@ -26,9 +26,9 @@ export const queryKeys = {
   sessions: ['student', 'sessions'] as const,
   recentSessions: (limit?: number) => ['student', 'sessions', 'recent', limit] as const,
   session: (id: string) => ['student', 'sessions', id] as const,
-  agentSessions: (agentId: string) => ['student', 'sessions', 'agent', agentId] as const,
-  agents: ['student', 'agents'] as const,
-  agent: (id: string) => ['student', 'agents', id] as const,
+  chatbotSessions: (chatbotId: string) => ['student', 'sessions', 'chatbot', chatbotId] as const,
+  chatbots: ['student', 'chatbots'] as const,
+  chatbot: (id: string) => ['student', 'chatbots', id] as const,
   artifacts: (params?: { type?: string; bookmarked?: boolean }) => ['student', 'artifacts', params] as const,
   leaderboard: (type: string, courseId?: string) => ['student', 'leaderboard', type, courseId] as const,
   models: ['models'] as const,
@@ -101,31 +101,31 @@ export const useCreateSession = () => {
   const queryClient = useQueryClient();
   
   return useMutation({
-    mutationFn: async ({ modelId, agentId, title }: { modelId: string; agentId?: string; title?: string }) => {
-      const response = await sessionsApi.create({ modelId, agentId, title });
+    mutationFn: async ({ modelId, chatbotId, title }: { modelId: string; chatbotId?: string; title?: string }) => {
+      const response = await sessionsApi.create({ modelId, chatbotId, title });
       return response.data.session;
     },
     onSuccess: (_, variables) => {
       queryClient.invalidateQueries({ queryKey: queryKeys.sessions });
       queryClient.invalidateQueries({ queryKey: queryKeys.dashboard });
-      if (variables.agentId) {
-        queryClient.invalidateQueries({ queryKey: queryKeys.agentSessions(variables.agentId) });
+      if (variables.chatbotId) {
+        queryClient.invalidateQueries({ queryKey: queryKeys.chatbotSessions(variables.chatbotId) });
       }
     },
   });
 };
 
-// Get sessions for a specific agent
-export const useAgentSessions = (agentId: string) => {
+// Get sessions for a specific chatbot
+export const useChatbotSessions = (chatbotId: string) => {
   const { isAuthenticated } = useAuth();
   
   return useQuery({
-    queryKey: queryKeys.agentSessions(agentId),
+    queryKey: queryKeys.chatbotSessions(chatbotId),
     queryFn: async () => {
-      const response = await sessionsApi.getAll({ agentId, limit: 50 });
+      const response = await sessionsApi.getAll({ chatbotId, limit: 50 });
       return response.data;
     },
-    enabled: isAuthenticated && !!agentId,
+    enabled: isAuthenticated && !!chatbotId,
     staleTime: 5000,
     refetchOnMount: 'always',
   });
@@ -150,36 +150,36 @@ export const useSendMessage = () => {
   });
 };
 
-// ==================== AGENTS ====================
+// ==================== CHATBOTS ====================
 
-export const useAgents = () => {
+export const useChatbots = () => {
   const { isAuthenticated } = useAuth();
   
   return useQuery({
-    queryKey: queryKeys.agents,
+    queryKey: queryKeys.chatbots,
     queryFn: async () => {
-      const response = await agentsApi.getAll();
-      return response.data.agents;
+      const response = await chatbotsApi.getAll();
+      return response.data.chatbots;
     },
     enabled: isAuthenticated,
     staleTime: 30000,
   });
 };
 
-export const useAgent = (agentId: string) => {
+export const useChatbot = (chatbotId: string) => {
   const { isAuthenticated } = useAuth();
   
   return useQuery({
-    queryKey: queryKeys.agent(agentId),
+    queryKey: queryKeys.chatbot(chatbotId),
     queryFn: async () => {
-      const response = await agentsApi.getById(agentId);
-      return response.data.agent;
+      const response = await chatbotsApi.getById(chatbotId);
+      return response.data.chatbot;
     },
-    enabled: isAuthenticated && !!agentId,
+    enabled: isAuthenticated && !!chatbotId,
   });
 };
 
-export const useCreateAgent = () => {
+export const useCreateChatbot = () => {
   const queryClient = useQueryClient();
   
   return useMutation({
@@ -192,41 +192,41 @@ export const useCreateAgent = () => {
       knowledgeBase?: string[];
       guardrailIds?: string[];
     }) => {
-      const response = await agentsApi.create(data);
-      return response.data.agent;
+      const response = await chatbotsApi.create(data);
+      return response.data.chatbot;
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: queryKeys.agents });
+      queryClient.invalidateQueries({ queryKey: queryKeys.chatbots });
       queryClient.invalidateQueries({ queryKey: queryKeys.dashboard });
     },
   });
 };
 
-export const useUpdateAgent = () => {
+export const useUpdateChatbot = () => {
   const queryClient = useQueryClient();
   
   return useMutation({
-    mutationFn: async ({ id, data }: { id: string; data: Partial<Agent> }) => {
-      const response = await agentsApi.update(id, data);
-      return response.data.agent;
+    mutationFn: async ({ id, data }: { id: string; data: Partial<Chatbot> }) => {
+      const response = await chatbotsApi.update(id, data);
+      return response.data.chatbot;
     },
     onSuccess: (_, variables) => {
-      queryClient.invalidateQueries({ queryKey: queryKeys.agents });
-      queryClient.invalidateQueries({ queryKey: queryKeys.agent(variables.id) });
+      queryClient.invalidateQueries({ queryKey: queryKeys.chatbots });
+      queryClient.invalidateQueries({ queryKey: queryKeys.chatbot(variables.id) });
     },
   });
 };
 
-export const useDeleteAgent = () => {
+export const useDeleteChatbot = () => {
   const queryClient = useQueryClient();
   
   return useMutation({
     mutationFn: async (id: string) => {
-      await agentsApi.delete(id);
+      await chatbotsApi.delete(id);
       return id;
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: queryKeys.agents });
+      queryClient.invalidateQueries({ queryKey: queryKeys.chatbots });
       queryClient.invalidateQueries({ queryKey: queryKeys.dashboard });
     },
   });
@@ -337,7 +337,7 @@ export const useGuardrails = () => {
   return useQuery({
     queryKey: queryKeys.guardrails,
     queryFn: async () => {
-      const response = await agentsApi.getGuardrails();
+      const response = await chatbotsApi.getGuardrails();
       return response.data.guardrails;
     },
     enabled: isAuthenticated,

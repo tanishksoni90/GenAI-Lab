@@ -3,14 +3,14 @@ import {
   modelsApi, 
   sessionsApi, 
   studentApi, 
-  agentsApi, 
+  chatbotsApi, 
   artifactsApi,
   AIModel,
   Session,
   DashboardStats,
   LeaderboardEntry,
   ActivityCalendar,
-  Agent,
+  Chatbot,
   Guardrail,
   Artifact,
   SendMessageResult,
@@ -92,8 +92,8 @@ export const useCreateSession = () => {
   const queryClient = useQueryClient();
   
   return useMutation({
-    mutationFn: ({ modelId, agentId }: { modelId: string; agentId?: string }) =>
-      sessionsApi.create(modelId, agentId),
+    mutationFn: ({ modelId, chatbotId }: { modelId: string; chatbotId?: string }) =>
+      sessionsApi.create({ modelId, chatbotId }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['sessions'] });
       queryClient.invalidateQueries({ queryKey: ['dashboard'] });
@@ -175,24 +175,24 @@ export const useActivityCalendar = () => {
   });
 };
 
-// ==================== AGENTS HOOKS ====================
+// ==================== CHATBOTS HOOKS ====================
 
-export const useAgents = () => {
+export const useChatbots = () => {
   return useQuery({
-    queryKey: ['agents'],
+    queryKey: ['chatbots'],
     queryFn: async () => {
-      const response = await agentsApi.getAll();
-      return response.data.agents;
+      const response = await chatbotsApi.getAll();
+      return response.data.chatbots;
     },
   });
 };
 
-export const useAgent = (id: string) => {
+export const useChatbot = (id: string) => {
   return useQuery({
-    queryKey: ['agents', id],
+    queryKey: ['chatbots', id],
     queryFn: async () => {
-      const response = await agentsApi.getById(id);
-      return response.data.agent;
+      const response = await chatbotsApi.getById(id);
+      return response.data.chatbot;
     },
     enabled: !!id,
   });
@@ -202,14 +202,14 @@ export const useGuardrails = () => {
   return useQuery({
     queryKey: ['guardrails'],
     queryFn: async () => {
-      const response = await agentsApi.getGuardrails();
+      const response = await chatbotsApi.getGuardrails();
       return response.data.guardrails;
     },
     staleTime: 10 * 60 * 1000, // 10 minutes
   });
 };
 
-export const useCreateAgent = () => {
+export const useCreateChatbot = () => {
   const queryClient = useQueryClient();
   
   return useMutation({
@@ -220,34 +220,34 @@ export const useCreateAgent = () => {
       behaviorPrompt?: string;
       strictMode?: boolean;
       guardrailIds?: string[];
-    }) => agentsApi.create(data),
+    }) => chatbotsApi.create(data),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['agents'] });
+      queryClient.invalidateQueries({ queryKey: ['chatbots'] });
       queryClient.invalidateQueries({ queryKey: ['dashboard'] });
     },
   });
 };
 
-export const useUpdateAgent = () => {
+export const useUpdateChatbot = () => {
   const queryClient = useQueryClient();
   
   return useMutation({
-    mutationFn: ({ id, data }: { id: string; data: Partial<Agent> }) =>
-      agentsApi.update(id, data),
+    mutationFn: ({ id, data }: { id: string; data: Partial<Chatbot> }) =>
+      chatbotsApi.update(id, data),
     onSuccess: (_, variables) => {
-      queryClient.invalidateQueries({ queryKey: ['agents'] });
-      queryClient.invalidateQueries({ queryKey: ['agents', variables.id] });
+      queryClient.invalidateQueries({ queryKey: ['chatbots'] });
+      queryClient.invalidateQueries({ queryKey: ['chatbots', variables.id] });
     },
   });
 };
 
-export const useDeleteAgent = () => {
+export const useDeleteChatbot = () => {
   const queryClient = useQueryClient();
   
   return useMutation({
-    mutationFn: (id: string) => agentsApi.delete(id),
+    mutationFn: (id: string) => chatbotsApi.delete(id),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['agents'] });
+      queryClient.invalidateQueries({ queryKey: ['chatbots'] });
       queryClient.invalidateQueries({ queryKey: ['dashboard'] });
     },
   });

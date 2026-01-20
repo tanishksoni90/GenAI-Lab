@@ -9,8 +9,8 @@ export const createSession = async (
   next: NextFunction
 ) => {
   try {
-    const { modelId, agentId } = req.body;
-    const session = await sessionService.createSession(req.user!.id, modelId, agentId);
+    const { modelId, chatbotId } = req.body;
+    const session = await sessionService.createSession(req.user!.id, modelId, chatbotId);
     return sendCreated(res, { session }, 'Session created successfully');
   } catch (error) {
     next(error);
@@ -41,13 +41,13 @@ export const getUserSessions = async (
     const page = parseInt(req.query.page as string) || 1;
     const limit = parseInt(req.query.limit as string) || 20;
     const modelId = req.query.modelId as string | undefined;
-    const agentId = req.query.agentId as string | undefined;
+    const chatbotId = req.query.chatbotId as string | undefined;
 
     const result = await sessionService.getUserSessions(req.user!.id, {
       page,
       limit,
       modelId,
-      agentId,
+      chatbotId,
     });
 
     return sendPaginated(res, result.sessions, result.page, result.limit, result.total);

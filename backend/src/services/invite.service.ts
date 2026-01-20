@@ -268,6 +268,11 @@ export const validateInviteToken = async (token: string) => {
  * This is the endpoint students use to set their initial password
  */
 export const setupAccount = async (token: string, password: string) => {
+  // Validate password requirements
+  if (!password || password.length < 8) {
+    throw new BadRequestError('Password must be at least 8 characters long');
+  }
+  
   // Validate token first
   const invite = await prisma.inviteToken.findUnique({
     where: { token },

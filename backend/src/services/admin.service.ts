@@ -111,10 +111,10 @@ export const getStudents = async (options: {
         course: { select: { id: true, name: true } },
         batch: { select: { id: true, name: true } },
         sessions: {
-          select: { avgScore: true, agentId: true },
+          select: { avgScore: true, chatbotId: true },
         },
         _count: {
-          select: { agents: true, artifacts: true },
+          select: { chatbots: true, artifacts: true },
         },
       },
     }),
@@ -128,9 +128,9 @@ export const getStudents = async (options: {
       ? sessionsWithScore.reduce((sum, s) => sum + (s.avgScore || 0), 0) / sessionsWithScore.length
       : null;
     
-    // Separate model sessions (agentId = null) from agent sessions (agentId != null)
-    const modelSessionsCount = student.sessions.filter(s => s.agentId === null).length;
-    const agentSessionsCount = student.sessions.filter(s => s.agentId !== null).length;
+    // Separate model sessions (chatbotId = null) from chatbot sessions (chatbotId != null)
+    const modelSessionsCount = student.sessions.filter(s => s.chatbotId === null).length;
+    const chatbotSessionsCount = student.sessions.filter(s => s.chatbotId !== null).length;
     
     // Remove sessions array from response, just return counts and avgScore
     const { sessions, ...rest } = student;
@@ -141,7 +141,7 @@ export const getStudents = async (options: {
         ...rest._count,
         sessions: modelSessionsCount, // Model sessions only for backward compatibility
         modelSessions: modelSessionsCount,
-        agentSessions: agentSessionsCount,
+        chatbotSessions: chatbotSessionsCount,
       }
     };
   });
@@ -174,12 +174,12 @@ export const getStudent = async (studentId: string) => {
           avgScore: true,
           tokensUsed: true,
           createdAt: true,
-          agentId: true,
+          chatbotId: true,
           model: { select: { name: true } },
         },
       },
       _count: {
-        select: { agents: true, artifacts: true },
+        select: { chatbots: true, artifacts: true },
       },
     },
   });
@@ -188,21 +188,21 @@ export const getStudent = async (studentId: string) => {
     throw new NotFoundError('Student not found');
   }
 
-  // Separate model sessions from agent sessions
-  const modelSessions = student.sessions.filter(s => s.agentId === null);
-  const agentSessions = student.sessions.filter(s => s.agentId !== null);
+  // Separate model sessions from chatbot sessions
+  const modelSessions = student.sessions.filter(s => s.chatbotId === null);
+  const chatbotSessions = student.sessions.filter(s => s.chatbotId !== null);
 
   return {
     ...student,
     // Return only last 5 model sessions for recent activity display
-    sessions: modelSessions.slice(0, 5).map(({ agentId, ...rest }) => rest),
-    // Return only last 5 agent sessions
-    agentSessions: agentSessions.slice(0, 5).map(({ agentId, ...rest }) => rest),
+    sessions: modelSessions.slice(0, 5).map(({ chatbotId, ...rest }) => rest),
+    // Return only last 5 chatbot sessions
+    chatbotSessions: chatbotSessions.slice(0, 5).map(({ chatbotId, ...rest }) => rest),
     _count: {
       ...student._count,
       sessions: modelSessions.length, // Model sessions only for backward compatibility
       modelSessions: modelSessions.length,
-      agentSessions: agentSessions.length,
+      chatbotSessions: chatbotSessions.length,
     },
   };
 };
@@ -718,7 +718,7 @@ export const getAnalytics = async () => {
   ] = await Promise.all([
     prisma.user.count({ where: { role: 'student' } }),
     prisma.user.count({ where: { role: 'student', isActive: true } }),
-    prisma.session.count({ where: { agentId: null } }), // Only model sessions
+    prisma.session.count({ where: { chatbotId: null } }), // Only model sessions
     prisma.message.count({ where: { role: 'user' } }),
     prisma.user.aggregate({
       where: { role: 'student' },
@@ -831,11 +831,11 @@ export const getAnalytics = async () => {
     },
   });
 
-  // Get model sessions by time period (agentId is null)
+  // Get model sessions by time period (chatbotId is null)
   const [dailySessions, weeklySessions, monthlySessions] = await Promise.all([
-    prisma.session.count({ where: { createdAt: { gte: startOfToday }, agentId: null } }),
-    prisma.session.count({ where: { createdAt: { gte: startOfWeek }, agentId: null } }),
-    prisma.session.count({ where: { createdAt: { gte: startOfMonth }, agentId: null } }),
+    prisma.session.count({ where: { createdAt: { gte: startOfToday }, chatbotId: null } }),
+    prisma.session.count({ where: { createdAt: { gte: startOfWeek }, chatbotId: null } }),
+    prisma.session.count({ where: { createdAt: { gte: startOfMonth }, chatbotId: null } }),
   ]);
 
   // Get prompts by time period
@@ -861,12 +861,12 @@ export const getAnalytics = async () => {
     }),
   ]);
 
-  // Get agents created by time period
-  const [dailyAgents, weeklyAgents, monthlyAgents, totalAgents] = await Promise.all([
-    prisma.agent.count({ where: { createdAt: { gte: startOfToday } } }),
-    prisma.agent.count({ where: { createdAt: { gte: startOfWeek } } }),
-    prisma.agent.count({ where: { createdAt: { gte: startOfMonth } } }),
-    prisma.agent.count(),
+  // Get chatbots created by time period
+  const [dailyChatbots, weeklyChatbots, monthlyChatbots, totalChatbots] = await Promise.all([
+    prisma.chatbot.count({ where: { createdAt: { gte: startOfToday } } }),
+    prisma.chatbot.count({ where: { createdAt: { gte: startOfWeek } } }),
+    prisma.chatbot.count({ where: { createdAt: { gte: startOfMonth } } }),
+    prisma.chatbot.count(),
   ]);
 
   // Get daily usage for last 30 days (for charts)
@@ -908,20 +908,20 @@ export const getAnalytics = async () => {
       registrationId: true,
       tokenUsed: true,
       sessions: {
-        select: { avgScore: true, agentId: true },
+        select: { avgScore: true, chatbotId: true },
       },
     },
   });
 
-  // Sort by model sessions count (sessions without agentId)
+  // Sort by model sessions count (sessions without chatbotId)
   const sortedTopPerformers = topPerformers
     .map(p => {
-      const modelSessions = p.sessions.filter(s => s.agentId === null);
-      const agentSessions = p.sessions.filter(s => s.agentId !== null);
+      const modelSessions = p.sessions.filter(s => s.chatbotId === null);
+      const chatbotSessions = p.sessions.filter(s => s.chatbotId !== null);
       return {
         ...p,
         modelSessionsCount: modelSessions.length,
-        agentSessionsCount: agentSessions.length,
+        chatbotSessionsCount: chatbotSessions.length,
         avgScore: modelSessions.length > 0
           ? modelSessions.reduce((sum, s) => sum + (s.avgScore || 0), 0) / modelSessions.length
           : 0,
@@ -939,7 +939,7 @@ export const getAnalytics = async () => {
       totalComparisonSessions,
       totalPrompts,
       totalTokensUsed: totalTokensUsed._sum.tokenUsed || 0,
-      totalAgents,
+      totalChatbots,
     },
     // Time-based analytics
     activeUsers: {
@@ -974,11 +974,11 @@ export const getAnalytics = async () => {
         total: totalComparisonTokens._sum.totalTokensUsed || 0,
       },
     },
-    agentsCreated: {
-      total: totalAgents,
-      daily: dailyAgents,
-      weekly: weeklyAgents,
-      monthly: monthlyAgents,
+    chatbotsCreated: {
+      total: totalChatbots,
+      daily: dailyChatbots,
+      weekly: weeklyChatbots,
+      monthly: monthlyChatbots,
     },
     // Cost analytics - all values in USD (universal standard)
     // Now using REAL tracked costs, not estimations
@@ -1285,7 +1285,7 @@ export const deleteGuardrail = async (guardrailId: string) => {
   const guardrail = await prisma.guardrail.findUnique({
     where: { id: guardrailId },
     include: {
-      agentGuardrails: {
+      chatbotGuardrails: {
         select: { id: true },
       },
     },
@@ -1299,12 +1299,12 @@ export const deleteGuardrail = async (guardrailId: string) => {
     throw new BadRequestError('Cannot delete system guardrails');
   }
 
-  // Use transaction to delete AgentGuardrail records first, then the guardrail
+  // Use transaction to delete ChatbotGuardrail records first, then the guardrail
   // This is necessary because the foreign key constraint is RESTRICT (default)
   await prisma.$transaction(async (tx) => {
-    // First, remove all AgentGuardrail associations
-    if (guardrail.agentGuardrails.length > 0) {
-      await tx.agentGuardrail.deleteMany({
+    // First, remove all ChatbotGuardrail associations
+    if (guardrail.chatbotGuardrails.length > 0) {
+      await tx.chatbotGuardrail.deleteMany({
         where: { guardrailId },
       });
     }

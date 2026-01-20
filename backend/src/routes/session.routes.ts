@@ -10,7 +10,7 @@ const router = Router();
 const createSessionSchema = z.object({
   body: z.object({
     modelId: z.string().uuid('Invalid model ID'),
-    agentId: z.string().uuid('Invalid agent ID').optional(),
+    chatbotId: z.string().uuid('Invalid chatbot ID').optional(),
   }),
 });
 

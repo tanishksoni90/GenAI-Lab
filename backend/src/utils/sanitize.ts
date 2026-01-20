@@ -50,9 +50,9 @@ export function sanitizeHtml(input: string): string {
   // Remove style tags (can contain expressions)
   sanitized = sanitized.replace(/<style\b[^<]*(?:(?!<\/style>)<[^<]*)*<\/style>/gi, '');
   
-  // Remove iframe, object, embed tags
-  sanitized = sanitized.replace(/<(iframe|object|embed|form|input|button)[^>]*>/gi, '');
-  sanitized = sanitized.replace(/<\/(iframe|object|embed|form|input|button)>/gi, '');
+  // Remove iframe, object, embed, svg, math, link tags (XSS-capable elements)
+  sanitized = sanitized.replace(/<(iframe|object|embed|form|input|button|svg|math|link)[^>]*>/gi, '');
+  sanitized = sanitized.replace(/<\/(iframe|object|embed|form|input|button|svg|math)>/gi, '');
   
   return sanitized;
 }
@@ -112,6 +112,11 @@ export function sanitizeUrl(url: string): string | null {
     return null;
   }
   
+  // Block protocol-relative URLs (//example.com) which can redirect to external domains
+  if (trimmed.startsWith('//')) {
+    return null;
+  }
+  
   // Only allow http, https, and relative URLs
   if (!trimmed.startsWith('http://') && 
       !trimmed.startsWith('https://') && 
@@ -140,6 +145,8 @@ export function normalizeWhitespace(input: string): string {
  */
 export function truncate(input: string, maxLength: number, suffix = '...'): string {
   if (!input || typeof input !== 'string') return '';
+  if (maxLength <= 0) return '';
+  if (maxLength <= suffix.length) return input.slice(0, maxLength);
   if (input.length <= maxLength) return input;
   return input.slice(0, maxLength - suffix.length) + suffix;
 }

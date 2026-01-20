@@ -65,6 +65,12 @@ export function generateSecurePassword(options: PasswordOptions = {}): string {
     throw new Error('At least one character type must be included');
   }
 
+  if (length < requiredChars.length) {
+    throw new Error(
+      `Password length must be at least ${requiredChars.length} to include all required character types`
+    );
+  }
+
   // Generate remaining random characters
   const remainingLength = Math.max(0, length - requiredChars.length);
   const randomChars: string[] = [];

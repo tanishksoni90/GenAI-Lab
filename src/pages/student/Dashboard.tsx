@@ -25,10 +25,10 @@ import { useToast } from "@/hooks/use-toast";
 import { 
   useDashboardStats, 
   useRecentSessions, 
-  useAgents, 
-  useCreateAgent,
-  useUpdateAgent,
-  useDeleteAgent,
+  useChatbots, 
+  useCreateChatbot,
+  useUpdateChatbot,
+  useDeleteChatbot,
   useArtifacts,
   useDeleteArtifact,
   useLeaderboard,
@@ -64,7 +64,7 @@ const StudentDashboard = () => {
   // Backend API data via React Query
   const { data: dashboardData, isLoading: isDashboardLoading, refetch: refetchDashboard } = useDashboardStats();
   const { data: recentSessions = [], isLoading: isSessionsLoading, refetch: refetchSessions } = useRecentSessions(10);
-  const { data: agentsData = [], isLoading: isAgentsLoading, refetch: refetchAgents } = useAgents();
+  const { data: chatbotsData = [], isLoading: isChatbotsLoading, refetch: refetchChatbots } = useChatbots();
   const { data: artifactsData, isLoading: isArtifactsLoading, refetch: refetchArtifacts } = useArtifacts();
   const { data: modelsData = [], isLoading: isModelsLoading, refetch: refetchModels } = useModels();
   const { data: guardrailsData = [], refetch: refetchGuardrails } = useGuardrails();
@@ -106,8 +106,8 @@ const StudentDashboard = () => {
           case 'models':
             await refetchModels();
             break;
-          case 'agents':
-            await refetchAgents();
+          case 'chatbots':
+            await refetchChatbots();
             break;
           case 'leaderboard':
             await refetchLeaderboard();
@@ -119,7 +119,7 @@ const StudentDashboard = () => {
             await Promise.all([
               refetchDashboard(),
               refetchSessions(),
-              refetchAgents(),
+              refetchChatbots(),
               refetchArtifacts(),
               refetchModels(),
               refetchLeaderboard(),
@@ -129,7 +129,7 @@ const StudentDashboard = () => {
         await Promise.all([
           refetchDashboard(),
           refetchSessions(),
-          refetchAgents(),
+          refetchChatbots(),
           refetchArtifacts(),
           refetchModels(),
           refetchLeaderboard(),
@@ -151,9 +151,9 @@ const StudentDashboard = () => {
   };
 
   // Mutations
-  const createAgentMutation = useCreateAgent();
-  const updateAgentMutation = useUpdateAgent();
-  const deleteAgentMutation = useDeleteAgent();
+  const createChatbotMutation = useCreateChatbot();
+  const updateChatbotMutation = useUpdateChatbot();
+  const deleteChatbotMutation = useDeleteChatbot();
   const deleteArtifactMutation = useDeleteArtifact();
 
   // Redirect to login if not authenticated
@@ -180,9 +180,9 @@ const StudentDashboard = () => {
     totalSessions: dashboardData?.stats?.sessions || 0,
     todayModelSessions: recentSessions.filter(s => {
       const today = new Date().toDateString();
-      return new Date(s.createdAt).toDateString() === today && !s.agentId;
+      return new Date(s.createdAt).toDateString() === today && !s.chatbotId;
     }).length,
-    totalAgentsCreated: agentsData.length,
+    totalChatbotsCreated: chatbotsData.length,
     weeklyPrompts: dashboardData?.stats?.prompts || 0,
     totalPrompts: dashboardData?.stats?.prompts || 0,
     avgPromptScore: dashboardData?.stats?.avgScore || 0,
@@ -195,13 +195,13 @@ const StudentDashboard = () => {
     activeDays: recentSessions.map(s => s.createdAt),
   };
   const sessions = recentSessions;
-  const agents = agentsData;
+  const chatbots = chatbotsData;
   const artifacts = artifactsData?.data || [];
   const models = modelsData;
 
   // Filter sessions by type
-  const getModelSessions = () => sessions.filter(s => !s.agentId);
-  const getAgentSessions = (agentId: string) => sessions.filter(s => s.agentId === agentId);
+  const getModelSessions = () => sessions.filter(s => !s.chatbotId);
+  const getChatbotSessions = (chatbotId: string) => sessions.filter(s => s.chatbotId === chatbotId);
 
   // Leaderboard helpers  
   const getCourseLeaderboard = () => leaderboardData;
@@ -211,9 +211,9 @@ const StudentDashboard = () => {
   const editFileInputRef = useRef<HTMLInputElement>(null);
   
   const [selectedArtifactType, setSelectedArtifactType] = useState<"all" | "image" | "code" | "document">("all");
-  const [isCreateAgentOpen, setIsCreateAgentOpen] = useState(false);
-  const [isEditAgentOpen, setIsEditAgentOpen] = useState(false);
-  const [editingAgent, setEditingAgent] = useState<any>(null);
+  const [isCreateChatbotOpen, setIsCreateChatbotOpen] = useState(false);
+  const [isEditChatbotOpen, setIsEditChatbotOpen] = useState(false);
+  const [editingChatbot, setEditingChatbot] = useState<any>(null);
   const [isCreateGuardrailOpen, setIsCreateGuardrailOpen] = useState(false);
   const [activeTab, setActiveTab] = useState(searchParams.get('tab') || 'overview');
   const [selectedModelCategory, setSelectedModelCategory] = useState<"text" | "image" | "audio" | "video" | "code" | "multimodal">(
@@ -231,10 +231,10 @@ const StudentDashboard = () => {
   // Model search state
   const [modelSearchQuery, setModelSearchQuery] = useState("");
   
-  // Create Agent Form State
-  const [agentName, setAgentName] = useState("");
-  const [agentDescription, setAgentDescription] = useState("");
-  const [agentModel, setAgentModel] = useState("");
+  // Create Chatbot Form State
+  const [chatbotName, setChatbotName] = useState("");
+  const [chatbotDescription, setChatbotDescription] = useState("");
+  const [chatbotModel, setChatbotModel] = useState("");
   const [selectedGuardrails, setSelectedGuardrails] = useState<string[]>([]);
   const [behaviorPrompt, setBehaviorPrompt] = useState("");
   const [strictMode, setStrictMode] = useState(false);
@@ -276,13 +276,13 @@ const StudentDashboard = () => {
     setKnowledgeBaseFiles(knowledgeBaseFiles.filter((_, i) => i !== index));
   };
 
-  // Handle file upload for editing agent KB
+  // Handle file upload for editing chatbot KB
   const handleEditFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files;
-    if (!files || !editingAgent) return;
+    if (!files || !editingChatbot) return;
     
-    const currentFiles = editingAgent.knowledgeBase || [];
-    const currentSize = editingAgent.knowledgeBaseSize || 0;
+    const currentFiles = editingChatbot.knowledgeBase || [];
+    const currentSize = editingChatbot.knowledgeBaseSize || 0;
     const newFileNames: string[] = [];
     let totalSize = currentSize;
     
@@ -300,8 +300,8 @@ const StudentDashboard = () => {
       totalSize += file.size;
     }
     
-    setEditingAgent({
-      ...editingAgent, 
+    setEditingChatbot({
+      ...editingChatbot, 
       knowledgeBase: [...currentFiles, ...newFileNames],
       knowledgeBaseSize: totalSize
     });
@@ -335,12 +335,12 @@ const StudentDashboard = () => {
     
     toast({
       title: "Custom guardrail created",
-      description: "Your custom guardrail has been added to the agent",
+      description: "Your custom guardrail has been added to the chatbot",
     });
   };
 
-  const handleCreateAgent = async () => {
-    if (!agentName || !agentModel) {
+  const handleCreateChatbot = async () => {
+    if (!chatbotName || !chatbotModel) {
       toast({
         title: "Missing required fields",
         description: "Please provide a name and select an AI model",
@@ -350,17 +350,17 @@ const StudentDashboard = () => {
     }
     
     // Get the model name from the backend models data
-    const selectedModelData = models.find(m => m.id === agentModel);
-    const modelName = selectedModelData?.name || agentModel;
+    const selectedModelData = models.find(m => m.id === chatbotModel);
+    const modelName = selectedModelData?.name || chatbotModel;
     
     // Prepare guardrail IDs for the backend
     const guardrailIds = selectedGuardrails.filter(id => !id.startsWith('custom-'));
     
     try {
-      await createAgentMutation.mutateAsync({
-        name: agentName,
-        description: agentDescription,
-        modelId: agentModel,
+      await createChatbotMutation.mutateAsync({
+        name: chatbotName,
+        description: chatbotDescription,
+        modelId: chatbotModel,
         behaviorPrompt,
         strictMode,
         knowledgeBase: knowledgeBaseFiles.map(f => f.name),
@@ -368,23 +368,23 @@ const StudentDashboard = () => {
       });
       
       toast({
-        title: "Agent created successfully!",
-        description: `${agentName} is ready to use`,
+        title: "Chatbot created successfully!",
+        description: `${chatbotName} is ready to use`,
       });
       
       // Reset form
-      setAgentName("");
-      setAgentDescription("");
-      setAgentModel("");
+      setChatbotName("");
+      setChatbotDescription("");
+      setChatbotModel("");
       setSelectedGuardrails([]);
       setBehaviorPrompt("");
       setStrictMode(false);
       setKnowledgeBaseFiles([]);
       setCustomGuardrails([]);
-      setIsCreateAgentOpen(false);
+      setIsCreateChatbotOpen(false);
     } catch (error: any) {
       toast({
-        title: "Failed to create agent",
+        title: "Failed to create chatbot",
         description: error.message || "Please try again",
         variant: "destructive",
       });
@@ -434,7 +434,7 @@ const StudentDashboard = () => {
       tokensPerRequest: m.inputCost || 1.0
     }));
   
-  // Enabled models for agent creation dropdowns
+  // Enabled models for chatbot creation dropdowns
   const enabledModels = models.filter(m => m.isActive);
   
   // Count unread notifications
@@ -443,7 +443,7 @@ const StudentDashboard = () => {
   // Dynamic stats based on real user data
   const quickStats = [
     { 
-      label: "Token Balance", 
+      label: "Learning Credits", 
       value: stats.tokenBalance.toLocaleString(),
       max: stats.tokenQuota.toLocaleString(),
       percentage: (stats.tokenBalance / stats.tokenQuota) * 100,
@@ -451,7 +451,7 @@ const StudentDashboard = () => {
       gradient: "gradient-primary",
       glow: "glow-primary",
       color: "text-blue-400",
-      description: "tokens remaining"
+      description: "credits remaining"
     },
     { 
       label: "Avg. Prompt Score", 
@@ -474,12 +474,12 @@ const StudentDashboard = () => {
       description: "created today"
     },
     { 
-      label: "AI Agents Created", 
-      value: stats.totalAgentsCreated,
+      label: "AI Chatbots Created", 
+      value: stats.totalChatbotsCreated,
       icon: Bot, 
       gradient: "gradient-success",
       color: "text-emerald-400",
-      description: "total agents"
+      description: "total chatbots"
     },
     { 
       label: "Course Rank", 
@@ -693,7 +693,7 @@ const StudentDashboard = () => {
               {[
                 { value: "overview", icon: LayoutGrid, label: "Overview" },
                 { value: "models", icon: Brain, label: "AI Models" },
-                { value: "agents", icon: Bot, label: "Agents" },
+                { value: "chatbots", icon: Bot, label: "Chatbots" },
                 { value: "compare", icon: Zap, label: "Compare" },
                 { value: "leaderboard", icon: Trophy, label: "Leaderboard" },
                 { value: "artifacts", icon: Layers, label: "Artifacts" },
@@ -834,10 +834,10 @@ const StudentDashboard = () => {
                   <CardContent className="space-y-3">
                     <Button 
                       className="w-full justify-start gradient-primary glow-primary btn-press h-12"
-                      onClick={() => setIsCreateAgentOpen(true)}
+                      onClick={() => setIsCreateChatbotOpen(true)}
                     >
                       <Bot className="w-5 h-5 mr-3" />
-                      Create AI Agent
+                      Create AI Chatbot
                     </Button>
                     <Button 
                       variant="outline" 
@@ -1140,8 +1140,8 @@ const StudentDashboard = () => {
             </Card>
           </TabsContent>
 
-          {/* AI AGENTS TAB */}
-          <TabsContent value="agents" className="mt-6">
+          {/* AI CHATBOTS TAB */}
+          <TabsContent value="chatbots" className="mt-6">
             <Card className="glass-card">
               <CardHeader>
                 <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
@@ -1150,35 +1150,35 @@ const StudentDashboard = () => {
                       <div className="w-10 h-10 rounded-xl gradient-accent glow-accent flex items-center justify-center">
                         <Bot className="w-5 h-5 text-white" />
                   </div>
-                      AI Agents
+                      AI Chatbots
                     </CardTitle>
                     <CardDescription className="mt-2">Your personalized AI assistants</CardDescription>
                   </div>
                   <div className="flex items-center gap-2">
-                    <Button variant="outline" size="sm" className="glass" onClick={() => handleRefresh('agents')} disabled={isRefreshing}>
+                    <Button variant="outline" size="sm" className="glass" onClick={() => handleRefresh('chatbots')} disabled={isRefreshing}>
                       <RefreshCw className={`w-4 h-4 mr-2 ${isRefreshing ? 'animate-spin' : ''}`} />
                       Refresh
                     </Button>
                     <Button 
                       className="gradient-accent glow-accent btn-press font-semibold"
-                      onClick={() => setIsCreateAgentOpen(true)}
+                      onClick={() => setIsCreateChatbotOpen(true)}
                     >
                       <Plus className="w-4 h-4 mr-2" />
-                      Create Agent
+                      Create Chatbot
                     </Button>
                   </div>
                 </div>
               </CardHeader>
               
               {/* Dialog moved outside of tabs for accessibility */}
-              <Dialog open={isCreateAgentOpen} onOpenChange={setIsCreateAgentOpen}>
+              <Dialog open={isCreateChatbotOpen} onOpenChange={setIsCreateChatbotOpen}>
                 <DialogContent className="max-w-2xl max-h-[90vh] p-0 glass-card border-white/10">
                       <DialogHeader className="p-6 pb-4 border-b border-white/5">
                         <DialogTitle className="text-2xl flex items-center gap-3">
                           <div className="w-10 h-10 rounded-xl gradient-accent glow-accent flex items-center justify-center">
                             <Bot className="w-5 h-5 text-white" />
                           </div>
-                          Create AI Agent
+                          Create AI Chatbot
                         </DialogTitle>
                         <DialogDescription>Build a personalized AI assistant for your learning</DialogDescription>
                     </DialogHeader>
@@ -1193,29 +1193,29 @@ const StudentDashboard = () => {
                             </h3>
                             <div className="grid gap-4">
                         <div>
-                                <Label htmlFor="agent-name">Agent Name *</Label>
+                                <Label htmlFor="chatbot-name">Chatbot Name *</Label>
                                 <Input 
-                                  id="agent-name" 
+                                  id="chatbot-name" 
                                   placeholder="e.g., Python Tutor, Math Helper" 
                                   className="glass mt-1.5"
-                                  value={agentName}
-                                  onChange={(e) => setAgentName(e.target.value)}
+                                  value={chatbotName}
+                                  onChange={(e) => setChatbotName(e.target.value)}
                                 />
                         </div>
                         <div>
-                          <Label htmlFor="agent-desc">Description</Label>
+                          <Label htmlFor="chatbot-desc">Description</Label>
                                 <Textarea 
-                                  id="agent-desc" 
+                                  id="chatbot-desc" 
                                   rows={2} 
-                                  placeholder="Describe what this agent helps with..." 
+                                  placeholder="Describe what this chatbot helps with..." 
                                   className="glass mt-1.5"
-                                  value={agentDescription}
-                                  onChange={(e) => setAgentDescription(e.target.value)}
+                                  value={chatbotDescription}
+                                  onChange={(e) => setChatbotDescription(e.target.value)}
                                 />
                         </div>
                         <div>
-                                <Label htmlFor="agent-model">AI Model *</Label>
-                                <Select value={agentModel} onValueChange={setAgentModel}>
+                                <Label htmlFor="chatbot-model">AI Model *</Label>
+                                <Select value={chatbotModel} onValueChange={setChatbotModel}>
                                   <SelectTrigger className="glass mt-1.5">
                               <SelectValue placeholder="Select a model" />
                             </SelectTrigger>
@@ -1245,7 +1245,7 @@ const StudentDashboard = () => {
                         <div>
                               <Textarea 
                                 rows={4} 
-                                placeholder="Define how your agent should behave...
+                                placeholder="Define how your chatbot should behave...
 
 Example: You are a friendly Python tutor. Explain concepts step-by-step with code examples. Always encourage the student and provide hints before giving answers." 
                                 className="glass font-mono text-sm"
@@ -1254,7 +1254,7 @@ Example: You are a friendly Python tutor. Explain concepts step-by-step with cod
                               />
                               <p className="text-xs text-muted-foreground mt-2 flex items-center gap-1">
                                 <Info className="w-3 h-3" />
-                                This prompt guides the agent's personality and teaching style
+                                This prompt guides the chatbot's personality and teaching style
                               </p>
                         </div>
                             
@@ -1265,7 +1265,7 @@ Example: You are a friendly Python tutor. Explain concepts step-by-step with cod
                                 <div>
                                   <Label className="font-medium">Strict Mode</Label>
                                   <p className="text-xs text-muted-foreground mt-0.5">
-                                    {strictMode ? "Agent strictly follows behavior prompt" : "Agent has flexibility in responses"}
+                                    {strictMode ? "Chatbot strictly follows behavior prompt" : "Chatbot has flexibility in responses"}
                                   </p>
                               </div>
                             </div>
@@ -1295,7 +1295,7 @@ Example: You are a friendly Python tutor. Explain concepts step-by-step with cod
                                       <Sparkles className="w-5 h-5 text-pink-400" />
                                       Add Custom Guardrail
                                     </DialogTitle>
-                                    <DialogDescription>Create your own guardrail rule for this agent</DialogDescription>
+                                    <DialogDescription>Create your own guardrail rule for this chatbot</DialogDescription>
                                   </DialogHeader>
                                   <div className="space-y-4 py-4">
                                     {/* Type Badge - Always Custom */}
@@ -1496,33 +1496,33 @@ Example: You are a friendly Python tutor. Explain concepts step-by-step with cod
                       </ScrollArea>
                       
                       <DialogFooter className="p-6 pt-4 border-t border-white/5 gap-2">
-                        <Button variant="outline" onClick={() => setIsCreateAgentOpen(false)} className="glass">Cancel</Button>
-                        <Button className="gradient-accent glow-accent" onClick={handleCreateAgent}>
+                        <Button variant="outline" onClick={() => setIsCreateChatbotOpen(false)} className="glass">Cancel</Button>
+                        <Button className="gradient-accent glow-accent" onClick={handleCreateChatbot}>
                           <Bot className="w-4 h-4 mr-2" />
-                          Create Agent
+                          Create Chatbot
                         </Button>
                     </DialogFooter>
                   </DialogContent>
                 </Dialog>
               
               <CardContent>
-                {agents.length === 0 ? (
+                {chatbots.length === 0 ? (
                   <div className="text-center py-12">
                     <div className="w-16 h-16 rounded-2xl gradient-accent glow-accent flex items-center justify-center mx-auto mb-4 opacity-50">
                       <Bot className="w-8 h-8 text-white" />
                     </div>
-                    <h3 className="text-lg font-semibold mb-2">No AI Agents Yet</h3>
-                    <p className="text-muted-foreground text-sm mb-4">Create your first AI agent to get started</p>
-                    <Button className="gradient-accent glow-accent" onClick={() => setIsCreateAgentOpen(true)}>
+                    <h3 className="text-lg font-semibold mb-2">No AI Chatbots Yet</h3>
+                    <p className="text-muted-foreground text-sm mb-4">Create your first AI chatbot to get started</p>
+                    <Button className="gradient-accent glow-accent" onClick={() => setIsCreateChatbotOpen(true)}>
                       <Plus className="w-4 h-4 mr-2" />
-                      Create Agent
+                      Create Chatbot
                     </Button>
                   </div>
                 ) : (
                   <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-                    {agents.map((agent, idx) => (
+                    {chatbots.map((chatbot, idx) => (
                       <Card 
-                        key={agent.id} 
+                        key={chatbot.id} 
                         className="glass-card card-hover overflow-hidden group animate-scale-in"
                         style={{ animationDelay: `${idx * 0.1}s` }}
                       >
@@ -1531,7 +1531,7 @@ Example: You are a friendly Python tutor. Explain concepts step-by-step with cod
                           <div className="flex items-start justify-between gap-3">
                             <div className="flex items-center gap-3">
                               <Bot className="w-5 h-5 text-muted-foreground" />
-                              <h3 className="font-semibold text-lg">{agent.name}</h3>
+                              <h3 className="font-semibold text-lg">{chatbot.name}</h3>
                             </div>
                             <Badge className="text-xs bg-emerald-500/20 text-emerald-400 border-emerald-500/30">
                               Active
@@ -1539,17 +1539,17 @@ Example: You are a friendly Python tutor. Explain concepts step-by-step with cod
                           </div>
 
                           {/* Description */}
-                          <p className="text-sm text-muted-foreground line-clamp-2">{agent.description || 'No description'}</p>
+                          <p className="text-sm text-muted-foreground line-clamp-2">{chatbot.description || 'No description'}</p>
                           
                           {/* Model Badge */}
                           <div className="flex items-center gap-2">
                             <Badge variant="outline" className="text-xs">
-                              {agent.model?.name || 'Unknown Model'}
+                              {chatbot.model?.name || 'Unknown Model'}
                             </Badge>
-                            {agent.knowledgeBase && agent.knowledgeBase.length > 0 && (
+                            {chatbot.knowledgeBase && chatbot.knowledgeBase.length > 0 && (
                               <Badge variant="outline" className="text-xs">
                                 <FileText className="w-3 h-3 mr-1" />
-                                {agent.knowledgeBase.length} files
+                                {chatbot.knowledgeBase.length} files
                               </Badge>
                             )}
                           </div>
@@ -1558,17 +1558,17 @@ Example: You are a friendly Python tutor. Explain concepts step-by-step with cod
                           <div className="grid grid-cols-2 gap-x-6 gap-y-2 py-2">
                             <div className="flex items-center gap-2">
                               <MessageSquare className="w-4 h-4 text-muted-foreground" />
-                              <span className="text-sm font-medium">{agent.sessionsCount}</span>
+                              <span className="text-sm font-medium">{chatbot.sessionsCount}</span>
                               <span className="text-xs text-muted-foreground">Sessions</span>
                             </div>
                             <div className="flex items-center gap-2">
                               <Zap className="w-4 h-4 text-emerald-400" />
-                              <span className="text-sm font-medium text-emerald-400">{agent.tokensUsed.toLocaleString()}</span>
+                              <span className="text-sm font-medium text-emerald-400">{chatbot.tokensUsed.toLocaleString()}</span>
                               <span className="text-xs text-muted-foreground">Tokens</span>
                             </div>
                             <div className="flex items-center gap-2">
                               <MessageSquare className="w-4 h-4 text-blue-400" />
-                              <span className="text-sm font-medium">{agent.messagesCount}</span>
+                              <span className="text-sm font-medium">{chatbot.messagesCount}</span>
                               <span className="text-xs text-muted-foreground">Messages</span>
                             </div>
                           </div>
@@ -1579,7 +1579,7 @@ Example: You are a friendly Python tutor. Explain concepts step-by-step with cod
                               variant="outline" 
                               size="sm"
                               className="glass"
-                              onClick={() => navigate(`/student/agent-chat/${agent.id}`)}
+                              onClick={() => navigate(`/student/chatbot-chat/${chatbot.id}`)}
                             >
                               <Play className="w-4 h-4 mr-1" />
                               Test
@@ -1589,8 +1589,8 @@ Example: You are a friendly Python tutor. Explain concepts step-by-step with cod
                               size="sm" 
                               className="glass"
                               onClick={() => {
-                                setEditingAgent(agent);
-                                setIsEditAgentOpen(true);
+                                setEditingChatbot(chatbot);
+                                setIsEditChatbotOpen(true);
                               }}
                             >
                               <Settings className="w-4 h-4 mr-1" />
@@ -1600,18 +1600,18 @@ Example: You are a friendly Python tutor. Explain concepts step-by-step with cod
                               variant="outline" 
                               size="sm" 
                               className="glass text-red-400 hover:text-red-400 hover:bg-red-500/10"
-                              disabled={deleteAgentMutation.isPending}
+                              disabled={deleteChatbotMutation.isPending}
                               onClick={async () => {
-                                if (confirm(`Are you sure you want to delete "${agent.name}"?`)) {
+                                if (confirm(`Are you sure you want to delete "${chatbot.name}"?`)) {
                                   try {
-                                    await deleteAgentMutation.mutateAsync(agent.id);
+                                    await deleteChatbotMutation.mutateAsync(chatbot.id);
                                     toast({
-                                      title: "Agent deleted",
-                                      description: `${agent.name} has been deleted.`,
+                                      title: "Chatbot deleted",
+                                      description: `${chatbot.name} has been deleted.`,
                                     });
                                   } catch (error: any) {
                                     toast({
-                                      title: "Failed to delete agent",
+                                      title: "Failed to delete chatbot",
                                       description: error.message,
                                       variant: "destructive",
                                     });
@@ -1993,15 +1993,15 @@ Example: You are a friendly Python tutor. Explain concepts step-by-step with cod
         </TabsContent>
         </Tabs>
 
-        {/* Global Create Agent Dialog - rendered outside tabs for accessibility from Quick Actions */}
-        <Dialog open={isCreateAgentOpen} onOpenChange={setIsCreateAgentOpen}>
+        {/* Global Create Chatbot Dialog - rendered outside tabs for accessibility from Quick Actions */}
+        <Dialog open={isCreateChatbotOpen} onOpenChange={setIsCreateChatbotOpen}>
           <DialogContent className="max-w-2xl max-h-[90vh] p-0 glass-card border-white/10">
             <DialogHeader className="p-6 pb-4 border-b border-white/5">
               <DialogTitle className="text-2xl flex items-center gap-3">
                 <div className="w-10 h-10 rounded-xl gradient-accent glow-accent flex items-center justify-center">
                   <Bot className="w-5 h-5 text-white" />
                 </div>
-                Create AI Agent
+                Create AI Chatbot
               </DialogTitle>
               <DialogDescription>Build a personalized AI assistant for your learning</DialogDescription>
             </DialogHeader>
@@ -2016,29 +2016,29 @@ Example: You are a friendly Python tutor. Explain concepts step-by-step with cod
                   </h3>
                   <div className="grid gap-4">
                     <div>
-                      <Label htmlFor="agent-name-global">Agent Name *</Label>
+                      <Label htmlFor="chatbot-name-global">Chatbot Name *</Label>
                       <Input 
-                        id="agent-name-global" 
+                        id="chatbot-name-global" 
                         placeholder="e.g., Python Tutor, Math Helper" 
                         className="glass mt-1.5"
-                        value={agentName}
-                        onChange={(e) => setAgentName(e.target.value)}
+                        value={chatbotName}
+                        onChange={(e) => setChatbotName(e.target.value)}
                       />
                     </div>
                     <div>
-                      <Label htmlFor="agent-desc-global">Description</Label>
+                      <Label htmlFor="chatbot-desc-global">Description</Label>
                       <Textarea 
-                        id="agent-desc-global" 
+                        id="chatbot-desc-global" 
                         rows={2} 
-                        placeholder="Describe what this agent helps with..." 
+                        placeholder="Describe what this chatbot helps with..." 
                         className="glass mt-1.5"
-                        value={agentDescription}
-                        onChange={(e) => setAgentDescription(e.target.value)}
+                        value={chatbotDescription}
+                        onChange={(e) => setChatbotDescription(e.target.value)}
                       />
                     </div>
                     <div>
-                      <Label htmlFor="agent-model-global">AI Model *</Label>
-                      <Select value={agentModel} onValueChange={setAgentModel}>
+                      <Label htmlFor="chatbot-model-global">AI Model *</Label>
+                      <Select value={chatbotModel} onValueChange={setChatbotModel}>
                         <SelectTrigger className="glass mt-1.5">
                           <SelectValue placeholder="Select a model" />
                         </SelectTrigger>
@@ -2068,7 +2068,7 @@ Example: You are a friendly Python tutor. Explain concepts step-by-step with cod
                   <div>
                     <Textarea 
                       rows={4} 
-                      placeholder="Define how your agent should behave..."
+                      placeholder="Define how your chatbot should behave..."
                       className="glass font-mono text-sm"
                       value={behaviorPrompt}
                       onChange={(e) => setBehaviorPrompt(e.target.value)}
@@ -2082,7 +2082,7 @@ Example: You are a friendly Python tutor. Explain concepts step-by-step with cod
                       <div>
                         <Label className="font-medium">Strict Mode</Label>
                         <p className="text-xs text-muted-foreground mt-0.5">
-                          {strictMode ? "Agent strictly follows behavior prompt" : "Agent has flexibility"}
+                          {strictMode ? "Chatbot strictly follows behavior prompt" : "Chatbot has flexibility"}
                         </p>
                       </div>
                     </div>
@@ -2150,19 +2150,19 @@ Example: You are a friendly Python tutor. Explain concepts step-by-step with cod
             </ScrollArea>
             
             <DialogFooter className="p-6 pt-4 border-t border-white/5 gap-2">
-              <Button variant="outline" onClick={() => setIsCreateAgentOpen(false)} className="glass">Cancel</Button>
-              <Button className="gradient-accent glow-accent" onClick={handleCreateAgent}>
+              <Button variant="outline" onClick={() => setIsCreateChatbotOpen(false)} className="glass">Cancel</Button>
+              <Button className="gradient-accent glow-accent" onClick={handleCreateChatbot}>
                 <Bot className="w-4 h-4 mr-2" />
-                Create Agent
+                Create Chatbot
               </Button>
             </DialogFooter>
           </DialogContent>
         </Dialog>
 
-        {/* Edit Agent Dialog */}
-        <Dialog open={isEditAgentOpen} onOpenChange={(open) => {
-          setIsEditAgentOpen(open);
-          if (!open) setEditingAgent(null);
+        {/* Edit Chatbot Dialog */}
+        <Dialog open={isEditChatbotOpen} onOpenChange={(open) => {
+          setIsEditChatbotOpen(open);
+          if (!open) setEditingChatbot(null);
         }}>
           <DialogContent className="max-w-lg glass-card border-white/10">
             <DialogHeader>
@@ -2170,20 +2170,20 @@ Example: You are a friendly Python tutor. Explain concepts step-by-step with cod
                 <div className="w-10 h-10 rounded-xl gradient-accent glow-accent flex items-center justify-center">
                   <Bot className="w-5 h-5 text-white" />
                 </div>
-                Edit Agent
+                Edit Chatbot
               </DialogTitle>
               <DialogDescription>
-                Update your AI agent's configuration
+                Update your AI chatbot's configuration
               </DialogDescription>
             </DialogHeader>
             
-            {editingAgent && (
+            {editingChatbot && (
               <div className="space-y-4 py-4">
                 <div className="space-y-2">
-                  <Label>Agent Name</Label>
+                  <Label>Chatbot Name</Label>
                   <Input 
-                    value={editingAgent.name}
-                    onChange={(e) => setEditingAgent({...editingAgent, name: e.target.value})}
+                    value={editingChatbot.name}
+                    onChange={(e) => setEditingChatbot({...editingChatbot, name: e.target.value})}
                     className="glass"
                   />
                 </div>
@@ -2191,20 +2191,20 @@ Example: You are a friendly Python tutor. Explain concepts step-by-step with cod
                 <div className="space-y-2">
                   <Label>Description</Label>
                   <textarea
-                    value={editingAgent.description}
-                    onChange={(e) => setEditingAgent({...editingAgent, description: e.target.value})}
+                    value={editingChatbot.description}
+                    onChange={(e) => setEditingChatbot({...editingChatbot, description: e.target.value})}
                     className="w-full min-h-[80px] p-3 rounded-xl glass text-sm resize-none"
-                    placeholder="What does this agent do?"
+                    placeholder="What does this chatbot do?"
                   />
                 </div>
                 
                 <div className="space-y-2">
                   <Label>Behavior Prompt</Label>
                   <textarea
-                    value={editingAgent.behaviorPrompt}
-                    onChange={(e) => setEditingAgent({...editingAgent, behaviorPrompt: e.target.value})}
+                    value={editingChatbot.behaviorPrompt}
+                    onChange={(e) => setEditingChatbot({...editingChatbot, behaviorPrompt: e.target.value})}
                     className="w-full min-h-[80px] p-3 rounded-xl glass text-sm resize-none"
-                    placeholder="Instructions for how the agent should behave..."
+                    placeholder="Instructions for how the chatbot should behave..."
                   />
                 </div>
                 
@@ -2214,8 +2214,8 @@ Example: You are a friendly Python tutor. Explain concepts step-by-step with cod
                     <p className="text-xs text-muted-foreground">Enforce stricter guardrail checking</p>
                   </div>
                   <Switch 
-                    checked={editingAgent.strictMode}
-                    onCheckedChange={(checked) => setEditingAgent({...editingAgent, strictMode: checked})}
+                    checked={editingChatbot.strictMode}
+                    onCheckedChange={(checked) => setEditingChatbot({...editingChatbot, strictMode: checked})}
                   />
                 </div>
                 
@@ -2241,9 +2241,9 @@ Example: You are a friendly Python tutor. Explain concepts step-by-step with cod
                       accept=".pdf,.txt,.md,.json"
                     />
                   </div>
-                  {(editingAgent.knowledgeBase || []).length > 0 ? (
+                  {(editingChatbot.knowledgeBase || []).length > 0 ? (
                     <div className="space-y-1">
-                      {(editingAgent.knowledgeBase || []).map((file, idx) => (
+                      {(editingChatbot.knowledgeBase || []).map((file, idx) => (
                         <div key={idx} className="flex items-center justify-between gap-2 p-2 rounded-lg bg-white/5 group">
                           <div className="flex items-center gap-2 text-xs">
                             <FileText className="w-3 h-3 text-muted-foreground" />
@@ -2254,8 +2254,8 @@ Example: You are a friendly Python tutor. Explain concepts step-by-step with cod
                             size="icon"
                             className="h-6 w-6 opacity-0 group-hover:opacity-100 hover:bg-red-500/20 text-red-400"
                             onClick={() => {
-                              const newFiles = (editingAgent.knowledgeBase || []).filter((_, i) => i !== idx);
-                              setEditingAgent({...editingAgent, knowledgeBase: newFiles});
+                              const newFiles = (editingChatbot.knowledgeBase || []).filter((_, i) => i !== idx);
+                              setEditingChatbot({...editingChatbot, knowledgeBase: newFiles});
                             }}
                           >
                             <X className="w-3 h-3" />
@@ -2270,11 +2270,11 @@ Example: You are a friendly Python tutor. Explain concepts step-by-step with cod
                 </div>
                 
                 {/* Guardrails Info (read-only) */}
-                {(editingAgent.guardrails || []).length > 0 && (
+                {(editingChatbot.guardrails || []).length > 0 && (
                   <div className="p-3 rounded-xl glass">
-                    <Label className="text-xs text-muted-foreground">Guardrails ({(editingAgent.guardrails || []).length})</Label>
+                    <Label className="text-xs text-muted-foreground">Guardrails ({(editingChatbot.guardrails || []).length})</Label>
                     <div className="mt-2 space-y-1">
-                      {(editingAgent.guardrails || []).map((g, idx) => (
+                      {(editingChatbot.guardrails || []).map((g, idx) => (
                         <Badge key={idx} variant="outline" className="text-[10px] mr-1">
                           {g.title || g.name || g}
                         </Badge>
@@ -2286,35 +2286,35 @@ Example: You are a friendly Python tutor. Explain concepts step-by-step with cod
             )}
             
             <DialogFooter className="gap-2">
-              <Button variant="outline" onClick={() => setIsEditAgentOpen(false)} className="glass">
+              <Button variant="outline" onClick={() => setIsEditChatbotOpen(false)} className="glass">
                 Cancel
               </Button>
               <Button 
                 className="gradient-accent glow-accent"
-                disabled={updateAgentMutation.isPending}
+                disabled={updateChatbotMutation.isPending}
                 onClick={async () => {
-                  if (editingAgent) {
+                  if (editingChatbot) {
                     try {
-                      await updateAgentMutation.mutateAsync({
-                        id: editingAgent.id,
+                      await updateChatbotMutation.mutateAsync({
+                        id: editingChatbot.id,
                         data: {
-                          name: editingAgent.name,
-                          description: editingAgent.description,
-                          behaviorPrompt: editingAgent.behaviorPrompt,
-                          strictMode: editingAgent.strictMode,
-                          knowledgeBase: editingAgent.knowledgeBase,
-                          status: editingAgent.status,
+                          name: editingChatbot.name,
+                          description: editingChatbot.description,
+                          behaviorPrompt: editingChatbot.behaviorPrompt,
+                          strictMode: editingChatbot.strictMode,
+                          knowledgeBase: editingChatbot.knowledgeBase,
+                          status: editingChatbot.status,
                         }
                       });
                       toast({
-                        title: "Agent updated",
-                        description: `${editingAgent.name} has been updated successfully.`,
+                        title: "Chatbot updated",
+                        description: `${editingChatbot.name} has been updated successfully.`,
                       });
-                      setIsEditAgentOpen(false);
-                      setEditingAgent(null);
+                      setIsEditChatbotOpen(false);
+                      setEditingChatbot(null);
                     } catch (error: any) {
                       toast({
-                        title: "Failed to update agent",
+                        title: "Failed to update chatbot",
                         description: error.message,
                         variant: "destructive",
                       });

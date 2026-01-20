@@ -787,11 +787,11 @@ const AdminDashboard = () => {
                   monthly: (analytics?.tokensUsed?.monthly || analytics?.overview?.totalTokensUsed || 0).toLocaleString() 
                 },
                 { 
-                  label: "Agents Created", 
+                  label: "Chatbots Created", 
                   icon: Activity, 
-                  daily: analytics?.agentsCreated?.daily || 0, 
-                  weekly: analytics?.agentsCreated?.weekly || 0, 
-                  monthly: analytics?.agentsCreated?.monthly || analytics?.agentsCreated?.total || 0 
+                  daily: analytics?.chatbotsCreated?.daily || 0, 
+                  weekly: analytics?.chatbotsCreated?.weekly || 0, 
+                  monthly: analytics?.chatbotsCreated?.monthly || analytics?.chatbotsCreated?.total || 0 
                 },
               ].map((stat, idx) => (
                 <Card key={idx} className="glass-card">
@@ -1597,8 +1597,8 @@ const AdminDashboard = () => {
                       <div className="flex items-center gap-2 p-2 rounded-lg" style={{ backgroundColor: 'rgba(139, 92, 246, 0.1)' }}>
                         <Bot className="w-4 h-4 text-purple-400" />
                         <div>
-                          <p className="text-xs text-muted-foreground">Agents</p>
-                          <p className="font-bold text-purple-400">{student._count?.agents || 0}</p>
+                          <p className="text-xs text-muted-foreground">Chatbots</p>
+                          <p className="font-bold text-purple-400">{student._count?.chatbots || 0}</p>
                         </div>
                       </div>
                       <div className="flex items-center gap-2 p-2 rounded-lg" style={{ backgroundColor: 'rgba(236, 72, 153, 0.1)' }}>
@@ -3725,7 +3725,7 @@ const AdminDashboard = () => {
           <AlertDialogHeader>
             <AlertDialogTitle>Delete Student</AlertDialogTitle>
             <AlertDialogDescription>
-              Are you sure you want to delete this student? This action cannot be undone. All associated data including sessions, agents, and artifacts will be removed.
+              Are you sure you want to delete this student? This action cannot be undone. All associated data including sessions, chatbots, and artifacts will be removed.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>

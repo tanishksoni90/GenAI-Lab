@@ -136,25 +136,22 @@ export const MODEL_PRICING_USD: Record<string, ModelPricing> = {
   
   // ==================== Google Models ====================
   // Source: https://ai.google.dev/pricing
-  'gemini-2.0-flash': { 
-    inputPer1M: 0.10, 
-    outputPer1M: 0.40 
-  },
-  'gemini-2.0-flash-lite': { 
-    inputPer1M: 0.075, 
-    outputPer1M: 0.30 
-  },
-  'gemini-2.5-flash-preview-05-20': { 
+  // Note: modelId uses 'models/' prefix for Google API
+  'models/gemini-2.5-flash': { 
     inputPer1M: 0.15, 
     outputPer1M: 0.60 
   },
-  'gemini-1.5-flash': { 
-    inputPer1M: 0.075, 
-    outputPer1M: 0.30 
-  },
-  'gemini-1.5-pro': { 
+  'models/gemini-2.5-pro': { 
     inputPer1M: 1.25, 
     outputPer1M: 5.00 
+  },
+  'models/gemini-2.0-flash': { 
+    inputPer1M: 0.10, 
+    outputPer1M: 0.40 
+  },
+  'models/gemini-2.0-flash-exp-image-generation': { 
+    inputPer1M: 40.00,  // Per image cost estimate (~$0.04 per image)
+    outputPer1M: 0 
   },
   
   // ==================== Anthropic Models ====================
