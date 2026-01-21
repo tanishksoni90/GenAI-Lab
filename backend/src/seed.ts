@@ -371,6 +371,96 @@ async function main() {
   });
   console.log(`✅ Created student: ${student.email} (password: Student@123)\n`);
 
+  // ==================== Cleanup Old/Invalid Models ====================
+  // Remove any Google models without the 'models/' prefix (old format)
+  // and remove deprecated models like gemini-1.5-flash
+  console.log('Cleaning up old/invalid models...');
+  const oldModelsToRemove = [
+    // Old format without 'models/' prefix
+    'gemini-2.0-flash',
+    'gemini-2.5-flash',
+    'gemini-2.5-pro',
+    'gemini-2.0-flash-exp-image-generation',
+    // Deprecated models
+    'gemini-1.5-flash',
+    'gemini-1.5-pro',
+    'gemini-pro',
+  ];
+  
+  // First, find the correct model IDs to migrate sessions to
+  const correctModels = await prisma.aIModel.findMany({
+    where: {
+      provider: 'google',
+      modelId: { startsWith: 'models/' },
+    },
+  });
+  
+  // Create a mapping from old modelId to new model's database ID
+  // Also map deprecated models to their best replacement
+  const modelIdMap: Record<string, string> = {};
+  const defaultGoogleModel = correctModels.find(m => m.modelId === 'models/gemini-2.0-flash');
+  
+  for (const model of correctModels) {
+    // Map old format to new format (e.g., 'gemini-2.0-flash' -> models/gemini-2.0-flash's ID)
+    const oldModelId = model.modelId.replace('models/', '');
+    modelIdMap[oldModelId] = model.id;
+  }
+  
+  // Map deprecated models to their replacements
+  if (defaultGoogleModel) {
+    // gemini-1.5-flash, gemini-1.5-pro, gemini-pro -> models/gemini-2.0-flash
+    modelIdMap['gemini-1.5-flash'] = defaultGoogleModel.id;
+    modelIdMap['gemini-1.5-pro'] = defaultGoogleModel.id;
+    modelIdMap['gemini-pro'] = defaultGoogleModel.id;
+  }
+  
+  // Update sessions that reference old models to use the new ones
+  for (const oldModelId of oldModelsToRemove) {
+    const oldModel = await prisma.aIModel.findFirst({
+      where: {
+        provider: 'google',
+        modelId: oldModelId,
+      },
+    });
+    
+    if (oldModel && modelIdMap[oldModelId]) {
+      // Migrate sessions to the new model
+      const updatedSessions = await prisma.session.updateMany({
+        where: { modelId: oldModel.id },
+        data: { modelId: modelIdMap[oldModelId] },
+      });
+      if (updatedSessions.count > 0) {
+        const targetModel = oldModelId.startsWith('gemini-1') || oldModelId === 'gemini-pro' 
+          ? 'models/gemini-2.0-flash (replacement)' 
+          : `models/${oldModelId}`;
+        console.log(`  📦 Migrated ${updatedSessions.count} sessions from ${oldModelId} to ${targetModel}`);
+      }
+    }
+  }
+  
+  // Now safely delete models that have no sessions
+  let deletedCount = 0;
+  for (const oldModelId of oldModelsToRemove) {
+    try {
+      const result = await prisma.aIModel.deleteMany({
+        where: {
+          provider: 'google',
+          modelId: oldModelId,
+        },
+      });
+      deletedCount += result.count;
+    } catch (error) {
+      // Skip if still has references (shouldn't happen after migration)
+      console.log(`  ⚠️ Could not delete ${oldModelId} (may still have references)`);
+    }
+  }
+  
+  if (deletedCount > 0) {
+    console.log(`✅ Removed ${deletedCount} old/invalid Google models\n`);
+  } else {
+    console.log('✅ No old models to clean up\n');
+  }
+
   console.log('═══════════════════════════════════════════════════════');
   console.log('🎉 Database seeded successfully!');
   console.log('═══════════════════════════════════════════════════════');
