@@ -1971,19 +1971,28 @@ Example: You are a friendly Python tutor. Explain concepts step-by-step with cod
                               variant="outline" 
                               className="flex-1 glass"
                               onClick={() => {
-                                // For images, open in new tab; for text/code, download as file
+                                // For HTTP images, open in new tab
                                 if (artifact.type === 'image' && artifact.content.match(/^https?:\/\//)) {
                                   window.open(artifact.content, '_blank');
+                                } else if (artifact.type === 'image' && artifact.content.startsWith('data:image/')) {
+                                  // Handle base64 data URLs for images
+                                  const a = document.createElement('a');
+                                  a.href = artifact.content;
+                                  a.download = `${artifact.title || 'image'}.png`;
+                                  a.click();
+                                } else if (artifact.type === 'audio' && artifact.content.startsWith('data:audio/')) {
+                                  // Handle base64 data URLs for audio
+                                  const a = document.createElement('a');
+                                  a.href = artifact.content;
+                                  a.download = `${artifact.title || 'audio'}.mp3`;
+                                  a.click();
                                 } else {
-                                  const blob = new Blob([artifact.content], { 
-                                    type: artifact.type === 'code' ? 'text/plain' : 
-                                          artifact.type === 'image' ? 'image/png' : 
-                                          'text/plain' 
-                                  });
+                                  // For text/code, download as file
+                                  const blob = new Blob([artifact.content], { type: 'text/plain' });
                                   const url = URL.createObjectURL(blob);
                                   const a = document.createElement('a');
                                   a.href = url;
-                                  a.download = `${artifact.title || 'artifact'}.${artifact.type === 'code' ? 'txt' : artifact.type === 'image' ? 'png' : 'txt'}`;
+                                  a.download = `${artifact.title || 'artifact'}.txt`;
                                   a.click();
                                   URL.revokeObjectURL(url);
                                 }
@@ -2048,12 +2057,12 @@ Example: You are a friendly Python tutor. Explain concepts step-by-step with cod
                   <div className="relative rounded-xl overflow-hidden border border-border">
                     {/* Header with language and copy button */}
                     <div className={`flex items-center justify-between px-4 py-2 border-b ${
-                      theme === 'dark' 
+                      isDark 
                         ? 'bg-zinc-800/80 border-white/10' 
                         : 'bg-gray-100 border-gray-200'
                     }`}>
                       <span className={`text-xs font-medium uppercase tracking-wider ${
-                        theme === 'dark' ? 'text-zinc-400' : 'text-gray-500'
+                        isDark ? 'text-zinc-400' : 'text-gray-500'
                       }`}>
                         {/* Try to detect language from content */}
                         {(() => {
@@ -2069,7 +2078,7 @@ Example: You are a friendly Python tutor. Explain concepts step-by-step with cod
                         variant="ghost"
                         size="sm"
                         className={`h-7 px-2 text-xs transition-colors ${
-                          theme === 'dark' 
+                          isDark 
                             ? 'hover:bg-white/10 text-zinc-400 hover:text-white' 
                             : 'hover:bg-gray-200 text-gray-500 hover:text-gray-900'
                         }`}
@@ -2091,11 +2100,11 @@ Example: You are a friendly Python tutor. Explain concepts step-by-step with cod
                         if (content.includes('interface ') || content.includes(': string') || content.includes(': number')) return 'typescript';
                         return 'text';
                       })()}
-                      style={theme === 'dark' ? oneDark : oneLight}
+                      style={isDark ? oneDark : oneLight}
                       customStyle={{
                         margin: 0,
                         padding: '1rem',
-                        background: theme === 'dark' ? 'rgb(24 24 27 / 0.8)' : 'rgb(249 250 251)',
+                        background: isDark ? 'rgb(24 24 27 / 0.8)' : 'rgb(249 250 251)',
                         fontSize: '0.875rem',
                         lineHeight: '1.5',
                       }}
@@ -2137,12 +2146,25 @@ Example: You are a friendly Python tutor. Explain concepts step-by-step with cod
                   onClick={() => {
                     if (selectedArtifact?.type === 'image' && selectedArtifact.content.match(/^https?:\/\//)) {
                       window.open(selectedArtifact.content, '_blank');
+                    } else if (selectedArtifact?.type === 'image' && selectedArtifact.content.startsWith('data:image/')) {
+                      // Handle base64 data URLs for images
+                      const a = document.createElement('a');
+                      a.href = selectedArtifact.content;
+                      a.download = `${selectedArtifact.title || 'image'}.png`;
+                      a.click();
+                    } else if (selectedArtifact?.type === 'audio' && selectedArtifact.content.startsWith('data:audio/')) {
+                      // Handle base64 data URLs for audio
+                      const a = document.createElement('a');
+                      a.href = selectedArtifact.content;
+                      a.download = `${selectedArtifact.title || 'audio'}.mp3`;
+                      a.click();
                     } else if (selectedArtifact) {
+                      // For text/code, download as file
                       const blob = new Blob([selectedArtifact.content], { type: 'text/plain' });
                       const url = URL.createObjectURL(blob);
                       const a = document.createElement('a');
                       a.href = url;
-                      a.download = `${selectedArtifact.title || 'artifact'}.${selectedArtifact.type === 'code' ? 'txt' : 'txt'}`;
+                      a.download = `${selectedArtifact.title || 'artifact'}.txt`;
                       a.click();
                       URL.revokeObjectURL(url);
                     }

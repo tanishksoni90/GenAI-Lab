@@ -24,7 +24,7 @@ import {
   Sparkles, Zap, Code, Target, TrendingUp, AlertTriangle,
   Copy, ThumbsUp, ThumbsDown, RefreshCw, PanelRightClose,
   PanelRight, Paperclip, Loader2, CheckCircle, Info,
-  Image as ImageIcon, Volume2, Check, Save, FileText
+  Image as ImageIcon, Volume2, Check, Save
 } from "lucide-react";
 import { useState, useEffect, useRef, useMemo } from "react";
 import { calculateRequestCost } from "@/lib/modelPricing";
@@ -81,6 +81,7 @@ const StudentChat = () => {
   const [copiedMessageId, setCopiedMessageId] = useState<string | null>(null);
   const [feedbackGiven, setFeedbackGiven] = useState<Record<string, 'up' | 'down' | null>>({});
   const [savedArtifactIds, setSavedArtifactIds] = useState<Set<string>>(new Set());
+  const [savingMessageId, setSavingMessageId] = useState<string | null>(null);
   
   // Check if we're opening an existing session or a new one
   const sessionIdFromUrl = searchParams.get('session');
@@ -258,6 +259,7 @@ const StudentChat = () => {
     const newSessionId = sessionIdFromUrl;
     if (newSessionId !== currentSessionId) {
       setCurrentSessionId(newSessionId);
+      setSavedArtifactIds(new Set()); // Reset saved artifacts tracking when switching sessions
       // If switching to a different session or new chat, reset messages until data loads
       if (newSessionId) {
         setMessages([]); // Will be populated by currentSessionData effect
@@ -682,6 +684,7 @@ const StudentChat = () => {
 
   // Save content as artifact
   const handleSaveArtifact = async (messageId: string, content: string) => {
+    if (savingMessageId) return; // Prevent concurrent saves
     if (!currentSessionId) {
       toast({
         title: "Cannot save artifact",
@@ -695,6 +698,7 @@ const StudentChat = () => {
     const title = generateArtifactTitle(content, type);
     
     try {
+      setSavingMessageId(messageId);
       await createArtifactMutation.mutateAsync({
         sessionId: currentSessionId,
         type,
@@ -709,11 +713,14 @@ const StudentChat = () => {
         description: `Saved as ${type} artifact: "${title}"`,
       });
     } catch (error) {
+      console.error('Failed to save artifact:', error);
       toast({
         title: "Failed to save",
         description: "Could not save artifact. Please try again.",
         variant: "destructive",
       });
+    } finally {
+      setSavingMessageId(null);
     }
   };
 
@@ -1024,12 +1031,12 @@ const StudentChat = () => {
                             size="icon" 
                             className={`h-7 w-7 hover:bg-white/5 ${savedArtifactIds.has(message.id) ? 'text-emerald-500 bg-emerald-500/10' : ''}`}
                             onClick={() => handleSaveArtifact(message.id, message.content)}
-                            disabled={createArtifactMutation.isPending || savedArtifactIds.has(message.id)}
+                            disabled={savingMessageId !== null || savedArtifactIds.has(message.id)}
                             title={savedArtifactIds.has(message.id) ? 'Saved to Artifacts' : 'Save to Artifacts'}
                           >
                             {savedArtifactIds.has(message.id) ? (
                               <Check className="w-3.5 h-3.5" />
-                            ) : createArtifactMutation.isPending ? (
+                            ) : savingMessageId === message.id ? (
                               <Loader2 className="w-3.5 h-3.5 animate-spin" />
                             ) : (
                               <Save className="w-3.5 h-3.5" />
