@@ -17,7 +17,8 @@ import prisma from '../lib/prisma';
 
 // Use gemini-2.0-flash for cost-effective analysis (latest stable model)
 // Pricing: Very low cost for flash models
-const ANALYSIS_MODEL = 'gemini-2.0-flash';
+// Note: Google API requires 'models/' prefix for model IDs
+const ANALYSIS_MODEL = 'models/gemini-2.0-flash';
 const INPUT_COST_PER_MILLION = 0.075; // USD per 1M input tokens
 const OUTPUT_COST_PER_MILLION = 0.30; // USD per 1M output tokens
 

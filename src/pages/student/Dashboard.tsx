@@ -17,6 +17,9 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Skeleton } from "@/components/ui/skeleton";
 import SkyToggle from "@/components/ui/sky-toggle";
+import { MarkdownRenderer } from "@/components/ui/markdown-renderer";
+import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
+import { oneDark, oneLight } from 'react-syntax-highlighter/dist/esm/styles/prism';
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { useTheme } from "@/contexts/ThemeContext";
 import { useAuth } from "@/contexts/AuthContext";
@@ -42,7 +45,7 @@ import {
   Zap, Activity, Target, Award, Bell, Brain, ChevronRight, Flame, 
   GraduationCap, LayoutGrid, Upload, X, FileUp, Shield, Search,
   ArrowUpRight, Layers, User, LogOut, Cpu, Lock, Unlock, Info, Volume2,
-  ChevronLeft, CreditCard, Check, Loader2, RefreshCw
+  ChevronLeft, CreditCard, Check, Loader2, RefreshCw, Eye, Copy
 } from "lucide-react";
 // Note: Assignments feature not yet implemented - no mock data needed
 
@@ -210,7 +213,9 @@ const StudentDashboard = () => {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const editFileInputRef = useRef<HTMLInputElement>(null);
   
-  const [selectedArtifactType, setSelectedArtifactType] = useState<"all" | "image" | "code" | "document">("all");
+  const [selectedArtifactType, setSelectedArtifactType] = useState<"all" | "image" | "code" | "text" | "audio">("all");
+  const [selectedArtifact, setSelectedArtifact] = useState<any>(null);
+  const [showArtifactPreview, setShowArtifactPreview] = useState(false);
   const [isCreateChatbotOpen, setIsCreateChatbotOpen] = useState(false);
   const [isEditChatbotOpen, setIsEditChatbotOpen] = useState(false);
   const [editingChatbot, setEditingChatbot] = useState<any>(null);
@@ -1859,14 +1864,17 @@ Example: You are a friendly Python tutor. Explain concepts step-by-step with cod
                       className="glass rounded-xl p-1"
                     >
                       <ToggleGroupItem value="all" className="data-[state=on]:gradient-secondary data-[state=on]:text-white rounded-lg px-4">All</ToggleGroupItem>
-                      <ToggleGroupItem value="image" className="data-[state=on]:gradient-accent data-[state=on]:text-white rounded-lg px-4">
+                      <ToggleGroupItem value="image" className="data-[state=on]:gradient-accent data-[state=on]:text-white rounded-lg px-4" title="Images">
                         <ImageIcon className="w-4 h-4" />
                       </ToggleGroupItem>
-                      <ToggleGroupItem value="code" className="data-[state=on]:gradient-primary data-[state=on]:text-white rounded-lg px-4">
+                      <ToggleGroupItem value="code" className="data-[state=on]:gradient-primary data-[state=on]:text-white rounded-lg px-4" title="Code">
                         <Code className="w-4 h-4" />
                       </ToggleGroupItem>
-                      <ToggleGroupItem value="document" className="data-[state=on]:gradient-tertiary data-[state=on]:text-white rounded-lg px-4">
+                      <ToggleGroupItem value="text" className="data-[state=on]:gradient-tertiary data-[state=on]:text-white rounded-lg px-4" title="Text">
                         <FileText className="w-4 h-4" />
+                      </ToggleGroupItem>
+                      <ToggleGroupItem value="audio" className="data-[state=on]:bg-emerald-500 data-[state=on]:text-white rounded-lg px-4" title="Audio">
+                        <Volume2 className="w-4 h-4" />
                       </ToggleGroupItem>
                     </ToggleGroup>
                   </div>
@@ -1918,12 +1926,69 @@ Example: You are a friendly Python tutor. Explain concepts step-by-step with cod
                           </div>
                         </CardHeader>
                         <CardContent>
+                          {/* Content Preview */}
+                          <div 
+                            className="mb-3 p-2 rounded-lg bg-muted/30 max-h-20 overflow-hidden cursor-pointer hover:bg-muted/50 transition-colors"
+                            onClick={() => {
+                              setSelectedArtifact(artifact);
+                              setShowArtifactPreview(true);
+                            }}
+                          >
+                            {artifact.type === 'image' && artifact.content.match(/^https?:\/\/|^data:image/) ? (
+                              <img 
+                                src={artifact.content} 
+                                alt={artifact.title || 'Image'} 
+                                className="w-full h-16 object-cover rounded"
+                              />
+                            ) : artifact.type === 'code' ? (
+                              <pre className="text-[10px] text-muted-foreground font-mono overflow-hidden whitespace-pre-wrap line-clamp-3">
+                                {artifact.content.slice(0, 200)}
+                              </pre>
+                            ) : (
+                              <p className="text-xs text-muted-foreground line-clamp-3">
+                                {artifact.content.slice(0, 150)}
+                              </p>
+                            )}
+                          </div>
                           <div className="flex items-center gap-2 mb-3">
                             <Badge variant="outline" className="text-xs">{artifact.session?.model?.name || 'Unknown'}</Badge>
                             <Badge variant="outline" className="text-xs capitalize">{artifact.type}</Badge>
                           </div>
                           <div className="flex gap-2">
-                            <Button size="sm" variant="outline" className="flex-1 glass">
+                            <Button 
+                              size="sm" 
+                              variant="outline" 
+                              className="glass"
+                              onClick={() => {
+                                setSelectedArtifact(artifact);
+                                setShowArtifactPreview(true);
+                              }}
+                            >
+                              <Eye className="w-4 h-4" />
+                            </Button>
+                            <Button 
+                              size="sm" 
+                              variant="outline" 
+                              className="flex-1 glass"
+                              onClick={() => {
+                                // For images, open in new tab; for text/code, download as file
+                                if (artifact.type === 'image' && artifact.content.match(/^https?:\/\//)) {
+                                  window.open(artifact.content, '_blank');
+                                } else {
+                                  const blob = new Blob([artifact.content], { 
+                                    type: artifact.type === 'code' ? 'text/plain' : 
+                                          artifact.type === 'image' ? 'image/png' : 
+                                          'text/plain' 
+                                  });
+                                  const url = URL.createObjectURL(blob);
+                                  const a = document.createElement('a');
+                                  a.href = url;
+                                  a.download = `${artifact.title || 'artifact'}.${artifact.type === 'code' ? 'txt' : artifact.type === 'image' ? 'png' : 'txt'}`;
+                                  a.click();
+                                  URL.revokeObjectURL(url);
+                                }
+                              }}
+                            >
                               <Download className="w-4 h-4 mr-1" />
                               Save
                             </Button>
@@ -1943,6 +2008,152 @@ Example: You are a friendly Python tutor. Explain concepts step-by-step with cod
                 )}
             </CardContent>
           </Card>
+
+          {/* Artifact Preview Dialog */}
+          <Dialog open={showArtifactPreview} onOpenChange={setShowArtifactPreview}>
+            <DialogContent className="glass-card max-w-3xl max-h-[80vh] overflow-hidden">
+              <DialogHeader>
+                <div className="flex items-center gap-3">
+                  <div className={`w-10 h-10 rounded-xl flex items-center justify-center ${
+                    selectedArtifact?.type === 'image' ? 'gradient-accent glow-accent' :
+                    selectedArtifact?.type === 'code' ? 'gradient-primary glow-primary' :
+                    selectedArtifact?.type === 'audio' ? 'gradient-success' :
+                    'gradient-secondary glow-secondary'
+                  }`}>
+                    {selectedArtifact?.type === 'image' ? <ImageIcon className="w-5 h-5 text-white" /> :
+                     selectedArtifact?.type === 'code' ? <Code className="w-5 h-5 text-white" /> :
+                     selectedArtifact?.type === 'audio' ? <Volume2 className="w-5 h-5 text-white" /> :
+                     <FileText className="w-5 h-5 text-white" />}
+                  </div>
+                  <div>
+                    <DialogTitle>{selectedArtifact?.title || 'Untitled Artifact'}</DialogTitle>
+                    <DialogDescription className="flex items-center gap-2 mt-1">
+                      <Badge variant="outline" className="text-xs">{selectedArtifact?.session?.model?.name || 'Unknown Model'}</Badge>
+                      <Badge variant="outline" className="text-xs capitalize">{selectedArtifact?.type}</Badge>
+                      <span className="text-xs text-muted-foreground">
+                        {selectedArtifact?.createdAt && new Date(selectedArtifact.createdAt).toLocaleString()}
+                      </span>
+                    </DialogDescription>
+                  </div>
+                </div>
+              </DialogHeader>
+              <ScrollArea className="max-h-[60vh] mt-4">
+                {selectedArtifact?.type === 'image' && selectedArtifact.content.match(/^https?:\/\/|^data:image/) ? (
+                  <img 
+                    src={selectedArtifact.content} 
+                    alt={selectedArtifact.title || 'Image'} 
+                    className="w-full rounded-lg"
+                  />
+                ) : selectedArtifact?.type === 'code' ? (
+                  <div className="relative rounded-xl overflow-hidden border border-border">
+                    {/* Header with language and copy button */}
+                    <div className={`flex items-center justify-between px-4 py-2 border-b ${
+                      theme === 'dark' 
+                        ? 'bg-zinc-800/80 border-white/10' 
+                        : 'bg-gray-100 border-gray-200'
+                    }`}>
+                      <span className={`text-xs font-medium uppercase tracking-wider ${
+                        theme === 'dark' ? 'text-zinc-400' : 'text-gray-500'
+                      }`}>
+                        {/* Try to detect language from content */}
+                        {(() => {
+                          const content = selectedArtifact.content.toLowerCase();
+                          if (content.includes('def ') || content.includes('import ') && content.includes(':')) return 'python';
+                          if (content.includes('function ') || content.includes('const ') || content.includes('let ')) return 'javascript';
+                          if (content.includes('<html') || content.includes('<div')) return 'html';
+                          if (content.includes('interface ') || content.includes(': string') || content.includes(': number')) return 'typescript';
+                          return 'code';
+                        })()}
+                      </span>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className={`h-7 px-2 text-xs transition-colors ${
+                          theme === 'dark' 
+                            ? 'hover:bg-white/10 text-zinc-400 hover:text-white' 
+                            : 'hover:bg-gray-200 text-gray-500 hover:text-gray-900'
+                        }`}
+                        onClick={() => {
+                          navigator.clipboard.writeText(selectedArtifact.content);
+                          toast({ title: "Copied to clipboard" });
+                        }}
+                      >
+                        <Copy className="w-3.5 h-3.5 mr-1.5" />
+                        Copy code
+                      </Button>
+                    </div>
+                    <SyntaxHighlighter
+                      language={(() => {
+                        const content = selectedArtifact.content.toLowerCase();
+                        if (content.includes('def ') || (content.includes('import ') && content.includes(':'))) return 'python';
+                        if (content.includes('function ') || content.includes('const ') || content.includes('let ')) return 'javascript';
+                        if (content.includes('<html') || content.includes('<div')) return 'html';
+                        if (content.includes('interface ') || content.includes(': string') || content.includes(': number')) return 'typescript';
+                        return 'text';
+                      })()}
+                      style={theme === 'dark' ? oneDark : oneLight}
+                      customStyle={{
+                        margin: 0,
+                        padding: '1rem',
+                        background: theme === 'dark' ? 'rgb(24 24 27 / 0.8)' : 'rgb(249 250 251)',
+                        fontSize: '0.875rem',
+                        lineHeight: '1.5',
+                      }}
+                      codeTagProps={{
+                        style: {
+                          fontFamily: '"JetBrains Mono", "Fira Code", Consolas, Monaco, "Andale Mono", monospace',
+                        }
+                      }}
+                    >
+                      {selectedArtifact.content}
+                    </SyntaxHighlighter>
+                  </div>
+                ) : selectedArtifact?.type === 'audio' && selectedArtifact.content.match(/^https?:\/\/|^data:audio/) ? (
+                  <audio controls className="w-full">
+                    <source src={selectedArtifact.content} />
+                    Your browser does not support audio playback.
+                  </audio>
+                ) : (
+                  <div className="prose dark:prose-invert max-w-none">
+                    <MarkdownRenderer content={selectedArtifact?.content || ''} />
+                  </div>
+                )}
+              </ScrollArea>
+              <DialogFooter className="flex gap-2 mt-4">
+                <Button
+                  variant="outline"
+                  className="glass"
+                  onClick={() => {
+                    navigator.clipboard.writeText(selectedArtifact?.content || '');
+                    toast({ title: "Copied to clipboard" });
+                  }}
+                >
+                  <Copy className="w-4 h-4 mr-2" />
+                  Copy
+                </Button>
+                <Button
+                  variant="outline"
+                  className="glass"
+                  onClick={() => {
+                    if (selectedArtifact?.type === 'image' && selectedArtifact.content.match(/^https?:\/\//)) {
+                      window.open(selectedArtifact.content, '_blank');
+                    } else if (selectedArtifact) {
+                      const blob = new Blob([selectedArtifact.content], { type: 'text/plain' });
+                      const url = URL.createObjectURL(blob);
+                      const a = document.createElement('a');
+                      a.href = url;
+                      a.download = `${selectedArtifact.title || 'artifact'}.${selectedArtifact.type === 'code' ? 'txt' : 'txt'}`;
+                      a.click();
+                      URL.revokeObjectURL(url);
+                    }
+                  }}
+                >
+                  <Download className="w-4 h-4 mr-2" />
+                  Download
+                </Button>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
         </TabsContent>
 
           {/* COURSES TAB */}

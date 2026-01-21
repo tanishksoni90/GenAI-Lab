@@ -12,13 +12,14 @@ import {
   useCreateSession, 
   useSession, 
   useSendMessage,
-  useDashboardStats
+  useDashboardStats,
+  useCreateArtifact
 } from "@/hooks/useStudentData";
 import { Message, Session } from "@/lib/api";
 import { 
   ArrowLeft, Send, Plus, MessageSquare, EyeOff, Bot, 
   Zap, Target, TrendingUp, AlertTriangle,
-  Copy, ThumbsUp, ThumbsDown,
+  Copy, ThumbsUp, ThumbsDown, Save, Check,
   PanelRightClose, PanelRight, Loader2, CheckCircle, FileText
 } from "lucide-react";
 import { useState, useEffect, useRef } from "react";
@@ -64,12 +65,14 @@ const ChatbotChat = () => {
   const { data: stats } = useDashboardStats();
   const createSessionMutation = useCreateSession();
   const sendMessageMutation = useSendMessage();
+  const createArtifactMutation = useCreateArtifact();
   
   // Local UI state
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [inputMessage, setInputMessage] = useState("");
   const [showArtifacts, setShowArtifacts] = useState(true);
   const [isTyping, setIsTyping] = useState(false);
+  const [savedArtifactIds, setSavedArtifactIds] = useState<Set<string>>(new Set());
   
   // Get welcome message
   const getWelcomeMessage = (): ChatMessage => ({
@@ -353,11 +356,97 @@ const ChatbotChat = () => {
     setCurrentSessionId(null);
     sessionCreatedRef.current = false;
     setSearchParams({});
+    setSavedArtifactIds(new Set());
   };
 
   const handleSwitchSession = (sessionId: string) => {
     setCurrentSessionId(sessionId);
     setSearchParams({ session: sessionId });
+    setSavedArtifactIds(new Set());
+  };
+
+  // Detect artifact type from content
+  const detectArtifactType = (content: string): 'text' | 'code' | 'image' | 'audio' => {
+    // Check for image URLs or base64 images
+    if (content.match(/!\[.*?\]\(.*?\)/) || 
+        content.includes('data:image/') || 
+        content.match(/https?:\/\/.*\.(png|jpg|jpeg|gif|webp|svg)/i)) {
+      return 'image';
+    }
+    
+    // Check for code blocks
+    if (content.includes('```') || 
+        content.match(/^(function|const|let|var|class|import|export|def |async |await )/m)) {
+      return 'code';
+    }
+    
+    // Check for audio URLs
+    if (content.match(/https?:\/\/.*\.(mp3|wav|ogg|m4a)/i) || 
+        content.includes('data:audio/')) {
+      return 'audio';
+    }
+    
+    return 'text';
+  };
+
+  // Generate artifact title from content
+  const generateArtifactTitle = (content: string, type: string): string => {
+    // Extract first meaningful line
+    const lines = content.split('\n').filter(l => l.trim());
+    let title = lines[0] || 'Untitled';
+    
+    // Clean up markdown headers
+    title = title.replace(/^#+\s*/, '');
+    
+    // For code, try to find function/class name
+    if (type === 'code') {
+      const match = content.match(/(function|class|const|def)\s+(\w+)/);
+      if (match) title = match[2];
+    }
+    
+    // Truncate if too long
+    if (title.length > 50) {
+      title = title.substring(0, 47) + '...';
+    }
+    
+    return title;
+  };
+
+  // Save content as artifact
+  const handleSaveArtifact = async (messageId: string, content: string) => {
+    if (!currentSessionId) {
+      toast({
+        title: "Cannot save artifact",
+        description: "Please start a session first",
+        variant: "destructive",
+      });
+      return;
+    }
+    
+    const type = detectArtifactType(content);
+    const title = generateArtifactTitle(content, type);
+    
+    try {
+      await createArtifactMutation.mutateAsync({
+        sessionId: currentSessionId,
+        type,
+        title,
+        content,
+      });
+      
+      setSavedArtifactIds(prev => new Set(prev).add(messageId));
+      
+      toast({
+        title: "Artifact saved!",
+        description: `Saved as ${type} artifact: "${title}"`,
+      });
+    } catch (error) {
+      toast({
+        title: "Failed to save",
+        description: "Could not save artifact. Please try again.",
+        variant: "destructive",
+      });
+    }
   };
 
   // Loading state
@@ -620,12 +709,31 @@ const ChatbotChat = () => {
                         >
                           <Copy className="w-3.5 h-3.5" />
                         </Button>
-                        <Button variant="ghost" size="icon" className="h-7 w-7 hover:bg-white/5">
+                        <Button variant="ghost" size="icon" className="h-7 w-7 hover:bg-white/5" disabled title="Coming soon">
                           <ThumbsUp className="w-3.5 h-3.5" />
                         </Button>
-                        <Button variant="ghost" size="icon" className="h-7 w-7 hover:bg-white/5">
+                        <Button variant="ghost" size="icon" className="h-7 w-7 hover:bg-white/5" disabled title="Coming soon">
                           <ThumbsDown className="w-3.5 h-3.5" />
                         </Button>
+                        {/* Save to Artifact button - only show for non-welcome messages with content */}
+                        {message.id !== 'welcome-1' && message.content && currentSessionId && (
+                          <Button 
+                            variant="ghost" 
+                            size="icon" 
+                            className={`h-7 w-7 hover:bg-white/5 ${savedArtifactIds.has(message.id) ? 'text-emerald-500 bg-emerald-500/10' : ''}`}
+                            onClick={() => handleSaveArtifact(message.id, message.content)}
+                            disabled={createArtifactMutation.isPending || savedArtifactIds.has(message.id)}
+                            title={savedArtifactIds.has(message.id) ? 'Saved to Artifacts' : 'Save to Artifacts'}
+                          >
+                            {savedArtifactIds.has(message.id) ? (
+                              <Check className="w-3.5 h-3.5" />
+                            ) : createArtifactMutation.isPending ? (
+                              <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                            ) : (
+                              <Save className="w-3.5 h-3.5" />
+                            )}
+                          </Button>
+                        )}
                       </>
                     )}
                   </div>
