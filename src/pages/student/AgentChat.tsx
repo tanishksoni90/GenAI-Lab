@@ -73,6 +73,7 @@ const ChatbotChat = () => {
   const [showArtifacts, setShowArtifacts] = useState(true);
   const [isTyping, setIsTyping] = useState(false);
   const [savedArtifactIds, setSavedArtifactIds] = useState<Set<string>>(new Set());
+  const [savingMessageId, setSavingMessageId] = useState<string | null>(null);
   
   // Get welcome message
   const getWelcomeMessage = (): ChatMessage => ({
@@ -414,6 +415,7 @@ const ChatbotChat = () => {
 
   // Save content as artifact
   const handleSaveArtifact = async (messageId: string, content: string) => {
+    if (savingMessageId) return; // Prevent concurrent saves
     if (!currentSessionId) {
       toast({
         title: "Cannot save artifact",
@@ -427,6 +429,7 @@ const ChatbotChat = () => {
     const title = generateArtifactTitle(content, type);
     
     try {
+      setSavingMessageId(messageId);
       await createArtifactMutation.mutateAsync({
         sessionId: currentSessionId,
         type,
@@ -441,11 +444,14 @@ const ChatbotChat = () => {
         description: `Saved as ${type} artifact: "${title}"`,
       });
     } catch (error) {
+      console.error('Failed to save artifact:', error);
       toast({
         title: "Failed to save",
         description: "Could not save artifact. Please try again.",
         variant: "destructive",
       });
+    } finally {
+      setSavingMessageId(null);
     }
   };
 
@@ -722,12 +728,12 @@ const ChatbotChat = () => {
                             size="icon" 
                             className={`h-7 w-7 hover:bg-white/5 ${savedArtifactIds.has(message.id) ? 'text-emerald-500 bg-emerald-500/10' : ''}`}
                             onClick={() => handleSaveArtifact(message.id, message.content)}
-                            disabled={createArtifactMutation.isPending || savedArtifactIds.has(message.id)}
+                            disabled={savingMessageId !== null || savedArtifactIds.has(message.id)}
                             title={savedArtifactIds.has(message.id) ? 'Saved to Artifacts' : 'Save to Artifacts'}
                           >
                             {savedArtifactIds.has(message.id) ? (
                               <Check className="w-3.5 h-3.5" />
-                            ) : createArtifactMutation.isPending ? (
+                            ) : savingMessageId === message.id ? (
                               <Loader2 className="w-3.5 h-3.5 animate-spin" />
                             ) : (
                               <Save className="w-3.5 h-3.5" />
