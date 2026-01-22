@@ -176,6 +176,65 @@ const StudentDashboard = () => {
   // Find user's rank from leaderboard data
   const userRankInLeaderboard = leaderboardData.find(entry => entry.id === userId)?.rank;
   
+  // Calculate current streak from active days
+  const calculateStreak = (activeDays: string[]): number => {
+    if (!activeDays || activeDays.length === 0) return 0;
+    
+    // Helper to format date as YYYY-MM-DD using local timezone
+    const toLocalDateStr = (date: Date): string => {
+      const year = date.getFullYear();
+      const month = String(date.getMonth() + 1).padStart(2, '0');
+      const day = String(date.getDate()).padStart(2, '0');
+      return `${year}-${month}-${day}`;
+    };
+    
+    // Get unique dates (in YYYY-MM-DD format using local timezone) and sort descending
+    const uniqueDates = [...new Set(
+      activeDays.map(d => toLocalDateStr(new Date(d)))
+    )].sort().reverse();
+    
+    if (uniqueDates.length === 0) return 0;
+    
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const todayStr = toLocalDateStr(today);
+    
+    const yesterday = new Date(today);
+    yesterday.setDate(yesterday.getDate() - 1);
+    const yesterdayStr = toLocalDateStr(yesterday);
+    
+    // Check if the streak includes today or yesterday (streak is still active)
+    const mostRecentActivity = uniqueDates[0];
+    if (mostRecentActivity !== todayStr && mostRecentActivity !== yesterdayStr) {
+      return 0; // Streak is broken
+    }
+    
+    // Count consecutive days - parse the local date string to avoid timezone shifts
+    let streak = 0;
+    const [year, month, day] = mostRecentActivity.split('-').map(Number);
+    let checkDate = new Date(year, month - 1, day);
+    
+    for (const dateStr of uniqueDates) {
+      const [aYear, aMonth, aDay] = dateStr.split('-').map(Number);
+      const activityDate = new Date(aYear, aMonth - 1, aDay);
+      activityDate.setHours(0, 0, 0, 0);
+      checkDate.setHours(0, 0, 0, 0);
+      
+      if (activityDate.getTime() === checkDate.getTime()) {
+        streak++;
+        checkDate.setDate(checkDate.getDate() - 1);
+      } else if (activityDate.getTime() < checkDate.getTime()) {
+        // Gap in activity - streak is broken
+        break;
+      }
+    }
+    
+    return streak;
+  };
+  
+  // Get active days from recent sessions
+  const activeDaysRaw = recentSessions.map(s => s.createdAt);
+  
   const stats = {
     tokenBalance: dashboardData?.tokens?.remaining || 0,
     tokenQuota: dashboardData?.tokens?.quota || 50000,
@@ -189,13 +248,13 @@ const StudentDashboard = () => {
     weeklyPrompts: dashboardData?.stats?.prompts || 0,
     totalPrompts: dashboardData?.stats?.prompts || 0,
     avgPromptScore: dashboardData?.stats?.avgScore || 0,
-    currentStreak: 0, // TODO: Add to backend
+    currentStreak: calculateStreak(activeDaysRaw),
     courseRank: userRankInLeaderboard || 0,
     institutionalRank: userRankInLeaderboard || 0,
     totalInCourse: leaderboardData.length,
     totalInInstitution: leaderboardData.length,
-    // Calculate active days from recent sessions
-    activeDays: recentSessions.map(s => s.createdAt),
+    // Store active days for calendar
+    activeDays: activeDaysRaw,
   };
   const sessions = recentSessions;
   const chatbots = chatbotsData;
@@ -847,11 +906,11 @@ const StudentDashboard = () => {
                     <Button 
                       variant="outline" 
                       className="w-full justify-start glass hover-glow h-12 group"
-                      onClick={() => navigate("/student/chat/dalle-3")}
+                      onClick={() => navigate("/student/dashboard?tab=models&category=image")}
                     >
                       <ImageIcon className="w-5 h-5 mr-3 text-pink-400" />
                       Generate Image
-                      <Badge className="ml-auto text-[10px] gradient-accent">DALL-E 3</Badge>
+                      <Badge className="ml-auto text-[10px] gradient-accent">AI Image</Badge>
                     </Button>
                     <Button 
                       variant="outline" 
@@ -1676,28 +1735,28 @@ Example: You are a friendly Python tutor. Explain concepts step-by-step with cod
 
           {/* LEADERBOARD TAB */}
           <TabsContent value="leaderboard" className="mt-6">
-            <Card className="bg-white dark:bg-slate-900 shadow-lg border-0">
+            <Card className="glass-card">
               <CardHeader className="pb-4">
                 <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
                   <div className="flex items-center gap-3">
-                    <div className="w-10 h-10 rounded-xl bg-amber-100 dark:bg-amber-500/20 flex items-center justify-center">
-                      <Trophy className="w-5 h-5 text-amber-600 dark:text-amber-400" />
+                    <div className="w-10 h-10 rounded-xl gradient-accent glow-accent flex items-center justify-center">
+                      <Trophy className="w-5 h-5 text-white" />
                     </div>
                     <div>
                       <div className="flex items-center gap-2">
-                        <h2 className="text-xl font-bold text-slate-800 dark:text-white">Student Leaderboard</h2>
-                        <Badge className="bg-slate-200 dark:bg-slate-700 text-slate-600 dark:text-slate-300 text-xs">
+                        <h2 className="text-xl font-bold">Student Leaderboard</h2>
+                        <Badge variant="outline" className="text-xs">
                           {leaderboardView === "institutional" ? "Institution" : "Course"} ({leaderboardData.length})
                         </Badge>
                       </div>
-                      <p className="text-sm text-slate-500 dark:text-slate-400">Top performers based on prompt evaluation scores</p>
+                      <p className="text-sm text-muted-foreground">Top performers based on prompt evaluation scores</p>
                     </div>
                   </div>
                   <div className="flex items-center gap-2">
                     <Button 
                       variant={leaderboardView === "institutional" ? "default" : "outline"}
                       size="sm" 
-                      className={leaderboardView === "institutional" ? "bg-violet-600 hover:bg-violet-700 text-white" : ""}
+                      className={leaderboardView === "institutional" ? "gradient-primary glow-primary text-white" : "glass"}
                       onClick={() => setLeaderboardView("institutional")}
                     >
                       Institution
@@ -1705,7 +1764,7 @@ Example: You are a friendly Python tutor. Explain concepts step-by-step with cod
                     <Button 
                       variant={leaderboardView === "course" ? "default" : "outline"}
                       size="sm" 
-                      className={leaderboardView === "course" ? "bg-violet-600 hover:bg-violet-700 text-white" : ""}
+                      className={leaderboardView === "course" ? "gradient-primary glow-primary text-white" : "glass"}
                       onClick={() => setLeaderboardView("course")}
                     >
                       Course
@@ -1721,7 +1780,7 @@ Example: You are a friendly Python tutor. Explain concepts step-by-step with cod
                 {leaderboardView === "course" && (
                   <div className="mt-4">
                     <Select value={enrolledCourse?.id || ""} disabled>
-                      <SelectTrigger className="w-64 bg-white dark:bg-slate-800">
+                      <SelectTrigger className="w-64 glass">
                         <SelectValue placeholder="Select a course..." />
                       </SelectTrigger>
                       <SelectContent>
@@ -1738,9 +1797,9 @@ Example: You are a friendly Python tutor. Explain concepts step-by-step with cod
                 <div className="space-y-2">
                   {leaderboardData.length === 0 ? (
                     <div className="text-center py-12">
-                      <Trophy className="w-12 h-12 mx-auto mb-4 text-slate-300 dark:text-slate-600" />
-                      <h3 className="font-semibold text-lg mb-2 text-slate-600 dark:text-slate-400">No rankings yet</h3>
-                      <p className="text-sm text-slate-500 dark:text-slate-500">
+                      <Trophy className="w-12 h-12 mx-auto mb-4 text-muted-foreground opacity-50" />
+                      <h3 className="font-semibold text-lg mb-2">No rankings yet</h3>
+                      <p className="text-sm text-muted-foreground">
                         {leaderboardView === "course" && !enrolledCourse 
                           ? "You are not enrolled in any course" 
                           : "Start using AI models to appear on the leaderboard"}
@@ -1752,29 +1811,29 @@ Example: You are a friendly Python tutor. Explain concepts step-by-step with cod
                       const skillLevel = entry.avgScore >= 90 ? 'Expert' : 
                                         entry.avgScore >= 75 ? 'Advanced' : 
                                         entry.avgScore >= 50 ? 'Proficient' : 'Beginner';
-                      const skillColor = entry.avgScore >= 90 ? 'bg-violet-100 text-violet-700 dark:bg-violet-500/20 dark:text-violet-400' : 
-                                        entry.avgScore >= 75 ? 'bg-blue-100 text-blue-700 dark:bg-blue-500/20 dark:text-blue-400' : 
-                                        entry.avgScore >= 50 ? 'bg-amber-100 text-amber-700 dark:bg-amber-500/20 dark:text-amber-400' : 
-                                        'bg-slate-100 text-slate-600 dark:bg-slate-700 dark:text-slate-400';
+                      const skillColor = entry.avgScore >= 90 ? 'gradient-primary text-white' : 
+                                        entry.avgScore >= 75 ? 'gradient-secondary text-white' : 
+                                        entry.avgScore >= 50 ? 'gradient-accent text-white' : 
+                                        'bg-muted text-muted-foreground';
                       const initials = entry.name.split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2);
                       
                       return (
                         <div 
                           key={entry.id || entry.rank} 
-                          className={`flex items-center gap-4 p-4 rounded-xl transition-colors ${
+                          className={`flex items-center gap-4 p-4 rounded-xl transition-colors glass ${
                             isCurrentUser 
-                              ? 'bg-amber-50 dark:bg-amber-500/10 border border-amber-200 dark:border-amber-500/30' 
-                              : 'bg-slate-50 dark:bg-slate-800/50 hover:bg-slate-100 dark:hover:bg-slate-800'
+                              ? 'border border-primary/50 bg-primary/5' 
+                              : 'hover:bg-muted/50'
                           }`}
                         >
                           {/* Rank */}
                           <div className="w-10 flex justify-center">
                             {entry.rank === 1 ? (
-                              <div className="w-8 h-8 rounded-full bg-gradient-to-br from-amber-400 to-amber-600 flex items-center justify-center">
+                              <div className="w-8 h-8 rounded-full bg-gradient-to-br from-amber-400 to-amber-600 flex items-center justify-center glow-accent">
                                 <Trophy className="w-4 h-4 text-white" />
                               </div>
                             ) : entry.rank === 2 ? (
-                              <div className="w-8 h-8 rounded-full bg-gradient-to-br from-slate-300 to-slate-500 flex items-center justify-center">
+                              <div className="w-8 h-8 rounded-full bg-gradient-to-br from-slate-400 to-slate-600 flex items-center justify-center">
                                 <Medal className="w-4 h-4 text-white" />
                               </div>
                             ) : entry.rank === 3 ? (
@@ -1782,16 +1841,16 @@ Example: You are a friendly Python tutor. Explain concepts step-by-step with cod
                                 <Medal className="w-4 h-4 text-white" />
                               </div>
                             ) : (
-                              <span className="text-lg font-bold text-slate-400 dark:text-slate-500">#{entry.rank}</span>
+                              <span className="text-lg font-bold text-muted-foreground">#{entry.rank}</span>
                             )}
                           </div>
                           
                           {/* Avatar */}
                           <div className={`w-10 h-10 rounded-full flex items-center justify-center text-sm font-semibold ${
-                            entry.rank === 1 ? 'bg-amber-100 text-amber-700 dark:bg-amber-500/20 dark:text-amber-400' :
-                            entry.rank === 2 ? 'bg-slate-200 text-slate-600 dark:bg-slate-600 dark:text-slate-300' :
-                            entry.rank === 3 ? 'bg-orange-100 text-orange-700 dark:bg-orange-500/20 dark:text-orange-400' :
-                            'bg-violet-100 text-violet-700 dark:bg-violet-500/20 dark:text-violet-400'
+                            entry.rank === 1 ? 'gradient-accent text-white' :
+                            entry.rank === 2 ? 'gradient-secondary text-white' :
+                            entry.rank === 3 ? 'gradient-tertiary text-white' :
+                            'gradient-primary text-white'
                           }`}>
                             {initials}
                           </div>
@@ -1799,17 +1858,17 @@ Example: You are a friendly Python tutor. Explain concepts step-by-step with cod
                           {/* Name and stats */}
                           <div className="flex-1 min-w-0">
                             <div className="flex items-center gap-2 flex-wrap">
-                              <span className="font-semibold text-slate-800 dark:text-white">{entry.name}</span>
+                              <span className="font-semibold">{entry.name}</span>
                               {entry.rank <= 3 && (
-                                <Badge className="bg-amber-100 text-amber-700 dark:bg-amber-500/20 dark:text-amber-400 text-xs">
+                                <Badge variant="outline" className="text-xs border-amber-500/50 text-amber-600">
                                   Top {entry.rank}
                                 </Badge>
                               )}
                               {isCurrentUser && (
-                                <span className="text-amber-600 dark:text-amber-400 text-sm font-medium">(You)</span>
+                                <span className="text-primary text-sm font-medium">(You)</span>
                               )}
                             </div>
-                            <div className="flex items-center gap-3 mt-1 text-sm text-slate-500 dark:text-slate-400">
+                            <div className="flex items-center gap-3 mt-1 text-sm text-muted-foreground">
                               <span>{entry.sessions} prompts</span>
                               <span>•</span>
                               <span>{entry.tokensUsed?.toLocaleString() || 0} tokens</span>
@@ -1822,10 +1881,10 @@ Example: You are a friendly Python tutor. Explain concepts step-by-step with cod
                           
                           {/* Score */}
                           <div className={`text-xl font-bold ${
-                            entry.avgScore >= 90 ? 'text-violet-600 dark:text-violet-400' :
-                            entry.avgScore >= 75 ? 'text-blue-600 dark:text-blue-400' :
-                            entry.avgScore >= 50 ? 'text-amber-600 dark:text-amber-400' :
-                            'text-slate-600 dark:text-slate-400'
+                            entry.avgScore >= 90 ? 'text-emerald-500' :
+                            entry.avgScore >= 75 ? 'text-blue-500' :
+                            entry.avgScore >= 50 ? 'text-amber-500' :
+                            'text-muted-foreground'
                           }`}>
                             {entry.avgScore}%
                           </div>
