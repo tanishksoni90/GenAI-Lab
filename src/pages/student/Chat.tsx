@@ -24,7 +24,7 @@ import {
   Sparkles, Zap, Code, Target, TrendingUp, AlertTriangle,
   Copy, ThumbsUp, ThumbsDown, RefreshCw, PanelRightClose,
   PanelRight, Paperclip, Loader2, CheckCircle, Info,
-  Image as ImageIcon, Volume2, Check, Save
+  Image as ImageIcon, Volume2, Check, Save, Lightbulb
 } from "lucide-react";
 import { useState, useEffect, useRef, useMemo } from "react";
 import { calculateRequestCost } from "@/lib/modelPricing";
@@ -37,13 +37,18 @@ interface ChatMessage {
   timestamp?: string;
   score?: number;
   scoreBreakdown?: Record<string, number>;
+  scoreJustifications?: Record<string, string>;
   tokensUsed?: number;
   tokens?: number;
   blocked?: boolean;
   blockReason?: string;
   feedback?: {
     strengths?: string[];
-    improvements?: string[];
+    improvements?: Array<{
+      issue: string;
+      explanation: string;
+      howToFix: string;
+    }>;
     biggestGap?: string;
     suggestion?: string;
   };
@@ -51,6 +56,9 @@ interface ChatMessage {
     weakExample?: { prompt: string; issue: string };
     strongExample?: { prompt: string; why: string };
   };
+  goodVersionExample?: string;
+  badVersionExample?: string;
+  overallSuggestion?: string;
   guidingQuestions?: string[];
   createdAt?: string;
   isStreaming?: boolean;
@@ -147,12 +155,12 @@ const StudentChat = () => {
     id: "welcome-1",
     role: "assistant",
     content: isImageModel 
-      ? "Hello! I'm **DALL-E 3**, your image generation assistant. I can create stunning images from your text descriptions.\n\n✨ **Tips for great prompts:**\n• Be specific about style (photorealistic, cartoon, oil painting, etc.)\n• Describe colors, lighting, and mood\n• Include details about composition and perspective\n\n**Example:** \"A cozy coffee shop on a rainy evening, warm lighting through foggy windows, watercolor style\"\n\nWhat would you like me to create today?"
+      ? `Hello! I'm **${currentModel?.name || 'your image generation assistant'}**, powered by ${currentModel?.provider || 'AI'}. I can create stunning images from your text descriptions.\n\n✨ **Tips for great prompts:**\n• Be specific about style (photorealistic, cartoon, oil painting, etc.)\n• Describe colors, lighting, and mood\n• Include details about composition and perspective\n\n**Example:** "A cozy coffee shop on a rainy evening, warm lighting through foggy windows, watercolor style"\n\nWhat would you like me to create today?`
       : isAudioModel
       ? "Hello! I'm **Eleven Multilingual v2**, your text-to-speech assistant. I can convert your text into natural-sounding speech.\n\n🎙️ **How to use:**\n• Type or paste the text you want me to read\n• I'll generate high-quality audio\n• Supports multiple languages\n\n**Example:** \"Welcome to our product demo. Today we'll be exploring the latest features...\"\n\nWhat text would you like me to convert to speech?"
       : `Hello! I'm **${currentModel?.name || 'your AI assistant'}**. How can I help you today? I can assist with:\n\n• **Coding questions** - Explain concepts, debug code, or help you learn new languages\n• **Research** - Help you find information and understand complex topics\n• **Writing** - Assist with essays, documentation, or creative writing\n• **Problem solving** - Work through logical problems step by step\n\nWhat would you like to explore?`,
     timestamp: new Date().toLocaleTimeString(),
-  }), [isImageModel, isAudioModel, currentModel?.name]);
+  }), [isImageModel, isAudioModel, currentModel?.name, currentModel?.provider]);
   
   // Initialize messages state
   const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -189,46 +197,57 @@ const StudentChat = () => {
         }
         
         // Transform criteria array to scoreBreakdown object
-        // Backend sends: [{name: 'Clarity', score: 20, maxScore: 25, feedback: '...'}, ...]
+        // Backend sends: [{name: 'Clarity', score: 20, maxScore: 25, feedback: '...', justification: '...'}, ...]
         // Frontend expects: {clarity: 80, specificity: 75, ...} (percentage values)
         let scoreBreakdown: Record<string, number> | undefined;
-        let criteriaDetails: Array<{ name: string; score: number; maxScore: number; feedback: string }> = [];
+        let scoreJustifications: Record<string, string> | undefined;
+        let criteriaDetails: Array<{ name: string; score: number; maxScore: number; feedback: string; justification?: string }> = [];
         
         if (scoreResult?.criteria && Array.isArray(scoreResult.criteria)) {
           scoreBreakdown = {};
+          scoreJustifications = {};
           criteriaDetails = scoreResult.criteria;
-          scoreResult.criteria.forEach((criterion: { name: string; score: number; maxScore: number; feedback: string }) => {
-            const key = criterion.name.toLowerCase().replace(/\s+/g, '');
+          scoreResult.criteria.forEach((criterion: { name: string; score: number; maxScore: number; feedback: string; justification?: string }) => {
+            const breakdownKey = criterion.name.toLowerCase().replace(/\s+/g, '');
             // Convert to percentage (score out of maxScore * 100)
-            scoreBreakdown![key] = Math.round((criterion.score / criterion.maxScore) * 100);
+            scoreBreakdown![breakdownKey] = Math.round((criterion.score / criterion.maxScore) * 100);
+            if (criterion.justification) {
+              // Use original criterion.name for readable display labels
+              scoreJustifications![criterion.name] = criterion.justification;
+            }
           });
         }
 
         // Extract feedback - properly handle Gemini vs rule-based responses
-        let feedbackData: { strengths?: string[]; improvements?: string[]; biggestGap?: string; suggestion?: string } | undefined;
+        let feedbackData: { strengths?: string[]; improvements?: Array<{issue: string; explanation: string; howToFix: string}>; biggestGap?: string; suggestion?: string } | undefined;
         if (scoreResult) {
           const isGemini = scoreResult.analysisSource === 'gemini';
           
           if (isGemini) {
-            // For Gemini: Extract strengths and improvements from criteria feedback
-            const highScoreCriteria = criteriaDetails.filter(c => c.score >= c.maxScore * 0.7);
-            const lowScoreCriteria = criteriaDetails.filter(c => c.score < c.maxScore * 0.7);
-            
+            // For Gemini: Use the new detailed fields directly
             feedbackData = {
-              strengths: highScoreCriteria.map(c => `**${c.name}**: ${c.feedback}`),
-              improvements: lowScoreCriteria.map(c => `**${c.name}**: ${c.feedback}`),
-              suggestion: scoreResult.comparison || scoreResult.feedback, // improvedPromptSuggestion or overallFeedback
+              strengths: scoreResult.strengths || criteriaDetails.filter(c => c.score >= c.maxScore * 0.7).map(c => `**${c.name}**: ${c.feedback}`),
+              improvements: scoreResult.improvements || criteriaDetails.filter(c => c.score < c.maxScore * 0.7).map(c => ({
+                issue: c.name,
+                explanation: c.feedback,
+                howToFix: c.justification || 'Review this area for improvement',
+              })),
+              suggestion: scoreResult.overallSuggestion || scoreResult.feedback,
             };
             
             // If there's an overall feedback, add it as the biggest gap summary
-            if (typeof scoreResult.feedback === 'string' && lowScoreCriteria.length > 0) {
+            if (typeof scoreResult.feedback === 'string' && criteriaDetails.some(c => c.score < c.maxScore * 0.7)) {
               feedbackData.biggestGap = scoreResult.feedback;
             }
           } else {
             // For rule-based: Use the concatenated feedback strings
             feedbackData = {
               strengths: criteriaDetails.filter(c => c.score >= c.maxScore * 0.7).map(c => c.feedback),
-              improvements: criteriaDetails.filter(c => c.score < c.maxScore * 0.7).map(c => c.feedback),
+              improvements: criteriaDetails.filter(c => c.score < c.maxScore * 0.7).map(c => ({
+                issue: c.name,
+                explanation: c.feedback,
+                howToFix: 'Consider improving this aspect',
+              })),
               suggestion: scoreResult.comparison || scoreResult.feedback,
             };
           }
@@ -242,8 +261,12 @@ const StudentChat = () => {
           score: m.score,
           tokensUsed: m.tokens,
           scoreBreakdown,
+          scoreJustifications,
           feedback: feedbackData,
           comparison: scoreResult?.comparison,
+          goodVersionExample: scoreResult?.goodVersionExample,
+          badVersionExample: scoreResult?.badVersionExample,
+          overallSuggestion: scoreResult?.overallSuggestion,
           analysisCostUSD: scoreResult?.analysisCostUSD,
         };
       });
@@ -456,39 +479,50 @@ const StudentChat = () => {
               
               // Transform criteria array to scoreBreakdown object
               let scoreBreakdown: Record<string, number> | undefined;
-              let criteriaDetails: Array<{ name: string; score: number; maxScore: number; feedback: string }> = [];
+              let scoreJustifications: Record<string, string> | undefined;
+              let criteriaDetails: Array<{ name: string; score: number; maxScore: number; feedback: string; justification?: string }> = [];
               
               if (scoreResult?.criteria && Array.isArray(scoreResult.criteria)) {
                 scoreBreakdown = {};
+                scoreJustifications = {};
                 criteriaDetails = scoreResult.criteria;
-                scoreResult.criteria.forEach((criterion: { name: string; score: number; maxScore: number; feedback: string }) => {
-                  const key = criterion.name.toLowerCase().replace(/\s+/g, '');
-                  scoreBreakdown![key] = Math.round((criterion.score / criterion.maxScore) * 100);
+                scoreResult.criteria.forEach((criterion: { name: string; score: number; maxScore: number; feedback: string; justification?: string }) => {
+                  const breakdownKey = criterion.name.toLowerCase().replace(/\s+/g, '');
+                  scoreBreakdown![breakdownKey] = Math.round((criterion.score / criterion.maxScore) * 100);
+                  if (criterion.justification) {
+                    // Use original criterion.name for readable display labels
+                    scoreJustifications![criterion.name] = criterion.justification;
+                  }
                 });
               }
 
               // Extract feedback - properly handle Gemini vs rule-based responses
-              let feedbackData: { strengths?: string[]; improvements?: string[]; biggestGap?: string; suggestion?: string } | undefined;
+              let feedbackData: { strengths?: string[]; improvements?: Array<{issue: string; explanation: string; howToFix: string}>; biggestGap?: string; suggestion?: string } | undefined;
               if (scoreResult) {
                 const isGemini = scoreResult.analysisSource === 'gemini';
                 
                 if (isGemini) {
-                  const highScoreCriteria = criteriaDetails.filter(c => c.score >= c.maxScore * 0.7);
-                  const lowScoreCriteria = criteriaDetails.filter(c => c.score < c.maxScore * 0.7);
-                  
                   feedbackData = {
-                    strengths: highScoreCriteria.map(c => `**${c.name}**: ${c.feedback}`),
-                    improvements: lowScoreCriteria.map(c => `**${c.name}**: ${c.feedback}`),
-                    suggestion: scoreResult.comparison || scoreResult.feedback,
+                    strengths: scoreResult.strengths || criteriaDetails.filter(c => c.score >= c.maxScore * 0.7).map(c => `**${c.name}**: ${c.feedback}`),
+                    improvements: scoreResult.improvements || criteriaDetails.filter(c => c.score < c.maxScore * 0.7).map(c => ({
+                      issue: c.name,
+                      explanation: c.feedback,
+                      howToFix: c.justification || 'Review this area for improvement',
+                    })),
+                    suggestion: scoreResult.overallSuggestion || scoreResult.feedback,
                   };
                   
-                  if (typeof scoreResult.feedback === 'string' && lowScoreCriteria.length > 0) {
+                  if (typeof scoreResult.feedback === 'string' && criteriaDetails.some(c => c.score < c.maxScore * 0.7)) {
                     feedbackData.biggestGap = scoreResult.feedback;
                   }
                 } else {
                   feedbackData = {
                     strengths: criteriaDetails.filter(c => c.score >= c.maxScore * 0.7).map(c => c.feedback),
-                    improvements: criteriaDetails.filter(c => c.score < c.maxScore * 0.7).map(c => c.feedback),
+                    improvements: criteriaDetails.filter(c => c.score < c.maxScore * 0.7).map(c => ({
+                      issue: c.name,
+                      explanation: c.feedback,
+                      howToFix: 'Consider improving this aspect',
+                    })),
                     suggestion: scoreResult.comparison || scoreResult.feedback,
                   };
                 }
@@ -505,6 +539,10 @@ const StudentChat = () => {
                 tokensUsed: result.userMessage.tokens,
                 feedback: feedbackData,
                 scoreBreakdown,
+                scoreJustifications,
+                goodVersionExample: scoreResult?.goodVersionExample,
+                badVersionExample: scoreResult?.badVersionExample,
+                overallSuggestion: scoreResult?.overallSuggestion,
                 comparison: scoreResult?.comparison as ChatMessage['comparison'],
                 analysisCostUSD: scoreResult?.analysisCostUSD,
               });
@@ -547,14 +585,9 @@ const StudentChat = () => {
 
   // Handle back button
   const handleBack = () => {
-    if (cameFromSession) {
-      // Came from recent sessions - go back to overview
-      navigate('/student/dashboard?tab=overview');
-    } else {
-      // Came from models tab - go back to models with correct category
-      const category = currentModel.category || 'text';
-      navigate(`/student/dashboard?tab=models&category=${category}`);
-    }
+    // Always go back to models tab with the correct category
+    const category = currentModel?.category || 'text';
+    navigate(`/student/dashboard?tab=models&category=${category}`);
   };
 
   // Copy message to clipboard
@@ -1245,71 +1278,88 @@ const StudentChat = () => {
                     </div>
                   )}
 
-                  {/* Biggest Gap */}
-                  {latestUserMessage.feedback?.biggestGap && (latestUserMessage.score || 0) < 80 && (
-                    <div className="glass rounded-xl p-4 border border-orange-500/20">
-                      <div className="flex items-center gap-2 mb-3">
-                        <AlertTriangle className="w-4 h-4 text-orange-400" />
-                        <h4 className="text-sm font-semibold text-orange-400">Biggest Gap</h4>
-                      </div>
-                      <p className="text-xs text-muted-foreground">{latestUserMessage.feedback.biggestGap}</p>
-                    </div>
-                  )}
-
-                  {/* Learning Through Comparison */}
-                  {latestUserMessage.comparison?.weakExample && latestUserMessage.comparison?.strongExample && (
+                  {/* Score Justifications - Expandable */}
+                  {latestUserMessage.scoreJustifications && Object.keys(latestUserMessage.scoreJustifications).length > 0 && (
                     <div className="glass rounded-xl p-4">
                       <div className="flex items-center gap-2 mb-3">
-                        <Sparkles className="w-4 h-4 text-cyan-400" />
-                        <h4 className="text-sm font-semibold">Learn by Comparison</h4>
+                        <Info className="w-4 h-4 text-purple-400" />
+                        <h4 className="text-sm font-semibold text-purple-400">Score Breakdown</h4>
                       </div>
-                      <div className="space-y-3">
-                        <div className="p-3 rounded-lg bg-pink-500/10 border border-pink-500/20">
-                          <div className="flex items-center gap-2 mb-2">
-                            <ThumbsDown className="w-3 h-3 text-pink-400" />
-                            <span className="text-xs font-medium text-pink-400">Weak Prompt</span>
+                      <div className="space-y-2">
+                        {Object.entries(latestUserMessage.scoreJustifications).map(([key, justification]) => (
+                          <div key={key} className="text-xs">
+                            <div className="font-medium text-foreground/80 mb-1">{key}</div>
+                            <p className="text-muted-foreground pl-2 border-l-2 border-purple-400/30">{justification}</p>
                           </div>
-                          <p className="text-xs font-mono bg-black/20 p-2 rounded mb-2">"{latestUserMessage.comparison.weakExample.prompt}"</p>
-                          <p className="text-[10px] text-pink-300">⚠️ {latestUserMessage.comparison.weakExample.issue}</p>
-                        </div>
-                        <div className="p-3 rounded-lg bg-emerald-500/10 border border-emerald-500/20">
-                          <div className="flex items-center gap-2 mb-2">
-                            <ThumbsUp className="w-3 h-3 text-emerald-400" />
-                            <span className="text-xs font-medium text-emerald-400">Strong Prompt</span>
-                          </div>
-                          <p className="text-xs font-mono bg-black/20 p-2 rounded mb-2">"{latestUserMessage.comparison.strongExample.prompt}"</p>
-                          <p className="text-[10px] text-emerald-300">✓ {latestUserMessage.comparison.strongExample.why}</p>
-                        </div>
+                        ))}
                       </div>
                     </div>
                   )}
 
-                  {/* Improvements Suggestions */}
-                  {latestUserMessage.feedback?.improvements && latestUserMessage.feedback.improvements.length > 0 && (latestUserMessage.score || 0) < 80 && (
+                  {/* Improvements with detailed explanations */}
+                  {latestUserMessage.feedback?.improvements && latestUserMessage.feedback.improvements.length > 0 && (
                     <div className="glass rounded-xl p-4">
                       <div className="flex items-center gap-2 mb-3">
                         <Target className="w-4 h-4 text-blue-400" />
-                        <h4 className="text-sm font-semibold text-blue-400">Improvements</h4>
+                        <h4 className="text-sm font-semibold text-blue-400">Areas to Improve</h4>
                       </div>
-                      <ul className="space-y-2">
+                      <div className="space-y-3">
                         {latestUserMessage.feedback.improvements.map((improvement, idx) => (
-                          <li key={idx} className="flex items-start gap-2 text-xs">
-                            <span className="text-blue-400 mt-0.5">→</span>
-                            <span className="text-muted-foreground">{improvement}</span>
-                          </li>
+                          <div key={idx} className="p-3 rounded-lg bg-blue-500/5 border border-blue-500/10">
+                            <div className="font-medium text-xs text-blue-300 mb-1">{typeof improvement === 'string' ? improvement : improvement.issue}</div>
+                            {typeof improvement !== 'string' && improvement.explanation && (
+                              <p className="text-[11px] text-muted-foreground mb-2">{improvement.explanation}</p>
+                            )}
+                            {typeof improvement !== 'string' && improvement.howToFix && (
+                              <div className="flex items-start gap-2 text-[11px] text-cyan-400">
+                                <span>💡</span>
+                                <span>{improvement.howToFix}</span>
+                              </div>
+                            )}
+                          </div>
                         ))}
-                      </ul>
+                      </div>
                     </div>
                   )}
 
-                  {/* Suggestion */}
-                  {latestUserMessage.feedback?.suggestion && (latestUserMessage.score || 0) < 80 && (
+                  {/* Good vs Bad Prompt Examples */}
+                  {(latestUserMessage.goodVersionExample || latestUserMessage.badVersionExample) && (
+                    <div className="glass rounded-xl p-4">
+                      <div className="flex items-center gap-2 mb-3">
+                        <Sparkles className="w-4 h-4 text-cyan-400" />
+                        <h4 className="text-sm font-semibold">Learn by Example</h4>
+                      </div>
+                      <div className="space-y-3">
+                        {latestUserMessage.badVersionExample && (
+                          <div className="p-3 rounded-lg bg-pink-500/10 border border-pink-500/20">
+                            <div className="flex items-center gap-2 mb-2">
+                              <ThumbsDown className="w-3 h-3 text-pink-400" />
+                              <span className="text-xs font-medium text-pink-400">❌ Weak Version</span>
+                            </div>
+                            <p className="text-xs font-mono bg-black/20 p-2 rounded text-pink-200/80 whitespace-pre-wrap">"{latestUserMessage.badVersionExample}"</p>
+                          </div>
+                        )}
+                        {latestUserMessage.goodVersionExample && (
+                          <div className="p-3 rounded-lg bg-emerald-500/10 border border-emerald-500/20">
+                            <div className="flex items-center gap-2 mb-2">
+                              <ThumbsUp className="w-3 h-3 text-emerald-400" />
+                              <span className="text-xs font-medium text-emerald-400">✅ Strong Version</span>
+                            </div>
+                            <p className="text-xs font-mono bg-black/20 p-2 rounded text-emerald-200/80 whitespace-pre-wrap">"{latestUserMessage.goodVersionExample}"</p>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Overall Suggestion */}
+                  {latestUserMessage.overallSuggestion && (
                     <div className="glass rounded-xl p-4 border border-cyan-500/20">
                       <div className="flex items-center gap-2 mb-3">
-                        <Info className="w-4 h-4 text-cyan-400" />
-                        <h4 className="text-sm font-semibold text-cyan-400">Suggestion</h4>
+                        <Lightbulb className="w-4 h-4 text-amber-400" />
+                        <h4 className="text-sm font-semibold text-amber-400">Pro Tip</h4>
                       </div>
-                      <p className="text-xs text-muted-foreground italic">{latestUserMessage.feedback.suggestion}</p>
+                      <p className="text-xs text-muted-foreground">{latestUserMessage.overallSuggestion}</p>
                     </div>
                   )}
 

@@ -67,6 +67,7 @@ export const useRecentSessions = (limit?: number) => {
     enabled: isAuthenticated,
     staleTime: 5000, // 5 seconds - short so session counts update quickly
     refetchOnMount: 'always',
+    refetchOnWindowFocus: true,
   });
 };
 
@@ -106,8 +107,12 @@ export const useCreateSession = () => {
       return response.data.session;
     },
     onSuccess: (_, variables) => {
+      // Invalidate all session-related queries
       queryClient.invalidateQueries({ queryKey: queryKeys.sessions });
+      queryClient.invalidateQueries({ queryKey: ['student', 'sessions'] }); // This covers recentSessions too
       queryClient.invalidateQueries({ queryKey: queryKeys.dashboard });
+      // Invalidate leaderboard since new session affects scores
+      queryClient.invalidateQueries({ queryKey: ['student', 'leaderboard'] });
       if (variables.chatbotId) {
         queryClient.invalidateQueries({ queryKey: queryKeys.chatbotSessions(variables.chatbotId) });
       }
@@ -144,8 +149,10 @@ export const useSendMessage = () => {
       queryClient.invalidateQueries({ queryKey: queryKeys.session(variables.sessionId) });
       // Invalidate dashboard stats (for prompt count)
       queryClient.invalidateQueries({ queryKey: queryKeys.dashboard });
-      // Invalidate recent sessions list
+      // Invalidate recent sessions list (covers all session queries)
       queryClient.invalidateQueries({ queryKey: ['student', 'sessions'] });
+      // Invalidate leaderboard since message scores affect ranking
+      queryClient.invalidateQueries({ queryKey: ['student', 'leaderboard'] });
     },
   });
 };
@@ -309,7 +316,9 @@ export const useLeaderboard = (type: 'institutional' | 'course', courseId?: stri
       return response.data;
     },
     enabled: isAuthenticated,
-    staleTime: 60000, // 1 minute - leaderboard doesn't change that often
+    staleTime: 30000, // 30 seconds - refresh more often
+    refetchOnMount: 'always',
+    refetchOnWindowFocus: true,
   });
 };
 

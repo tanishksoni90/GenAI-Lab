@@ -489,6 +489,9 @@ const callGoogle = async (
   }, `Google Gemini (${modelId})`);
 };
 
+// NOTE: Google Gemini Image Generation model has been removed because it doesn't
+// actually generate images - it only describes them. Use DALL-E 3 for image generation.
+
 // ElevenLabs API call (Text-to-Speech)
 const callElevenLabs = async (
   modelId: string,
@@ -799,7 +802,8 @@ export const streamWithModel = async (
   try {
     let result: { tokensUsed: number; inputTokens: number; outputTokens: number };
 
-    // Handle image generation models (DALL-E) - they don't support streaming
+    // Handle image generation models - they don't support streaming
+    // Only DALL-E 3 is supported for image generation
     if (model.category === 'image') {
       const imageResult = await callOpenAI(model.modelId, prompt, conversationHistory, 'image');
       onChunk(imageResult.content, true);

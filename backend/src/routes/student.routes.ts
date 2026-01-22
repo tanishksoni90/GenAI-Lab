@@ -1,12 +1,12 @@
 import { Router } from 'express';
 import * as studentController from '../controllers/student.controller';
-import { authenticate, requireStudent } from '../middleware/auth';
+import { authenticate, requireAny } from '../middleware/auth';
 
 const router = Router();
 
-// All routes require authentication and student role
+// All routes require authentication (both students and admins can access)
 router.use(authenticate);
-router.use(requireStudent);
+router.use(requireAny);
 
 // Dashboard
 router.get('/dashboard', studentController.getDashboard);

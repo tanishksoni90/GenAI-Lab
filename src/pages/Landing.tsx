@@ -274,16 +274,16 @@ const Landing = () => {
                 className="gradient-primary glow-primary btn-press h-14 px-8 text-lg font-semibold group"
               >
                 <Rocket className="w-5 h-5 mr-2 group-hover:rotate-12 transition-transform" />
-                Student Login
+                Get Started
                 <ArrowRight className="w-5 h-5 ml-2 group-hover:translate-x-1 transition-transform" />
               </Button>
               <Button 
                 size="lg" 
                 variant="outline"
-                onClick={() => navigate("/admin/signin")}
+                onClick={() => navigate("/student/signup")}
                 className="glass hover-glow h-14 px-8 text-lg font-medium group"
               >
-                Already have an account? Sign In
+                New Student? Sign Up
               </Button>
             </div>
 
@@ -574,16 +574,16 @@ const Landing = () => {
                   onClick={() => navigate("/student/signin")}
                   className="gradient-primary glow-primary btn-press h-14 px-10 text-lg font-semibold"
                 >
-                  Student Login
+                  Get Started
                   <ArrowRight className="w-5 h-5 ml-2" />
                 </Button>
                 <Button 
                   size="lg" 
                   variant="outline"
-                  onClick={() => navigate("/admin/signin")}
+                  onClick={() => navigate("/student/signup")}
                   className="glass hover-glow h-14 px-10 text-lg"
                 >
-                  Admin Login
+                  Create Account
                 </Button>
               </div>
             </div>
@@ -607,8 +607,6 @@ const Landing = () => {
               <a href="#" className="hover:text-foreground transition-colors">Privacy Policy</a>
               <a href="#" className="hover:text-foreground transition-colors">Terms of Service</a>
               <a href="#" className="hover:text-foreground transition-colors">Contact</a>
-              <span className="text-white/10">|</span>
-              <a href="/admin/signin" className="hover:text-foreground transition-colors opacity-50 hover:opacity-100">Admin Portal</a>
             </div>
             <div className="text-sm text-muted-foreground">
               © 2025 GenAI Lab. All rights reserved.

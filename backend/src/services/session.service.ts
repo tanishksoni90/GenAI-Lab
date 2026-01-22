@@ -297,19 +297,30 @@ export const sendMessage = async (
       },
     });
 
-    // Update session stats
+    // Update session stats (and title if first message)
+    const isFirstMessage = session.messages.length === 0;
+    const sessionUpdateData: any = {
+      promptCount: { increment: 1 },
+      totalScore: { increment: scoreResult.totalScore },
+      avgScore,
+      inputTokens: { increment: inputTokens },
+      outputTokens: { increment: outputTokens },
+      tokensUsed: { increment: totalTokens }, // Legacy field
+      totalCost: { increment: costUSD },
+      updatedAt: new Date(),
+    };
+    
+    // Set title from first message content (truncated to 50 chars)
+    if (isFirstMessage) {
+      const titleFromMessage = sanitizedContent.length > 50 
+        ? sanitizedContent.substring(0, 47) + '...'
+        : sanitizedContent;
+      sessionUpdateData.title = titleFromMessage;
+    }
+    
     await tx.session.update({
       where: { id: sessionId },
-      data: {
-        promptCount: { increment: 1 },
-        totalScore: { increment: scoreResult.totalScore },
-        avgScore,
-        inputTokens: { increment: inputTokens },
-        outputTokens: { increment: outputTokens },
-        tokensUsed: { increment: totalTokens }, // Legacy field
-        totalCost: { increment: costUSD },
-        updatedAt: new Date(),
-      },
+      data: sessionUpdateData,
     });
 
     // Update user's budget (cost in USD) and virtual tokens - ATOMIC
@@ -562,19 +573,30 @@ export const sendMessageStreaming = async (
       },
     });
 
-    // Update session stats
+    // Update session stats (and title if first message)
+    const isFirstMessage = session.messages.length === 0;
+    const sessionUpdateData: any = {
+      promptCount: { increment: 1 },
+      totalScore: { increment: scoreResult.totalScore },
+      avgScore,
+      inputTokens: { increment: inputTokens },
+      outputTokens: { increment: outputTokens },
+      tokensUsed: { increment: totalTokens }, // Legacy
+      totalCost: { increment: costUSD },
+      updatedAt: new Date(),
+    };
+    
+    // Set title from first message content (truncated to 50 chars)
+    if (isFirstMessage) {
+      const titleFromMessage = sanitizedContent.length > 50 
+        ? sanitizedContent.substring(0, 47) + '...'
+        : sanitizedContent;
+      sessionUpdateData.title = titleFromMessage;
+    }
+    
     await tx.session.update({
       where: { id: sessionId },
-      data: {
-        promptCount: { increment: 1 },
-        totalScore: { increment: scoreResult.totalScore },
-        avgScore,
-        inputTokens: { increment: inputTokens },
-        outputTokens: { increment: outputTokens },
-        tokensUsed: { increment: totalTokens }, // Legacy
-        totalCost: { increment: costUSD },
-        updatedAt: new Date(),
-      },
+      data: sessionUpdateData,
     });
 
     // Update user's budget (cost in USD) and virtual tokens - ATOMIC

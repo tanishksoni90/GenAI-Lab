@@ -158,27 +158,8 @@ async function main() {
         maxTokens: 1000000,
       },
     }),
-    prisma.aIModel.upsert({
-      where: { provider_modelId: { provider: 'google', modelId: 'models/gemini-2.0-flash-exp-image-generation' } },
-      update: {
-        description: "Gemini 2.0 Flash Image Generation - Experimental model for AI image generation. Creates images from text prompts.",
-        maxTokens: 0,
-        inputCost: 0.04,   // Per image cost estimate - verify actual pricing
-        outputCost: 0,
-      },
-      create: {
-        name: 'Gemini 2.0 Flash Image',
-        provider: 'google',
-        modelId: 'models/gemini-2.0-flash-exp-image-generation',
-        // NOTE: This is an experimental model ("exp" in name). May be deprecated or changed without notice.
-        // Pricing is estimated - verify actual per-image cost from Google's API pricing page.
-        category: 'image',
-        description: "Gemini 2.0 Flash Image Generation - Experimental model for AI image generation. Creates images from text prompts.",
-        inputCost: 0.04,   // Per image cost estimate - verify actual pricing
-        outputCost: 0,
-        maxTokens: 0,
-      },
-    }),
+    // NOTE: Gemini 2.0 Flash Image Generation model removed - it doesn't actually generate images,
+    // only describes them. Use DALL-E 3 for reliable image generation.
     
     // ==================== Anthropic Models ====================
     // Source: https://www.anthropic.com/pricing
