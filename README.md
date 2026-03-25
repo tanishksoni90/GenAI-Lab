@@ -9,451 +9,242 @@
 </p>
 
 <p align="center">
-  <a href="#features">Features</a> •
+  <a href="#overview">Overview</a> •
+  <a href="#key-features">Key Features</a> •
+  <a href="#architecture--system-design">Architecture</a> •
   <a href="#tech-stack">Tech Stack</a> •
   <a href="#getting-started">Getting Started</a> •
-  <a href="#architecture">Architecture</a> •
-  <a href="#api-reference">API Reference</a>
-</p>
-
-<p align="center">
-  <img src="https://img.shields.io/badge/React-18.3-61DAFB?style=flat-square&logo=react" alt="React" />
-  <img src="https://img.shields.io/badge/TypeScript-5.6-3178C6?style=flat-square&logo=typescript" alt="TypeScript" />
-  <img src="https://img.shields.io/badge/Node.js-18+-339933?style=flat-square&logo=node.js" alt="Node.js" />
-  <img src="https://img.shields.io/badge/Prisma-5.22-2D3748?style=flat-square&logo=prisma" alt="Prisma" />
-  <img src="https://img.shields.io/badge/TailwindCSS-3.4-06B6D4?style=flat-square&logo=tailwindcss" alt="TailwindCSS" />
+  <a href="#api-documentation">API Documentation</a> •
+  <a href="#testing">Testing</a> •
+  <a href="#deployment">Deployment</a> •
+  <a href="#troubleshooting--faq">Troubleshooting</a>
 </p>
 
 ---
 
 ## 📋 Overview
 
-**GenAI Lab** is a comprehensive, production-ready learning platform designed to teach prompt engineering and provide unified access to multiple AI models. Built for educational institutions, it features real-time AI interactions, intelligent prompt scoring, multi-model comparison, and detailed analytics.
+**GenAI Lab** is a comprehensive, production-ready internal learning platform designed to train internal teams and students on prompt engineering. Built by and for our enterprise engineering team, the platform unifies access to multiple leading AI models (OpenAI, Anthropic, Google) under a single budget-controlled ecosystem.
 
-### Why GenAI Lab?
+It provides real-time streaming AI interactions, an intelligent rule-based/LLM-based prompt scoring engine, multi-model synchronous testing, and extensive administrative oversight through a centralized dashboard.
 
-| Challenge | Solution |
-|-----------|----------|
-| Students need hands-on AI experience | Interactive chat with GPT-4, Claude, Gemini & more |
-| No structured prompt engineering curriculum | AI-powered prompt scoring with detailed feedback |
-| Expensive API access for students | Unified token budget with cost tracking |
-| Hard to compare AI model outputs | Side-by-side multi-model comparison tool |
-| Limited visibility into student progress | Comprehensive admin analytics dashboard |
+As the repository transitions from initial architecture to a collaborative multi-developer environment, this platform adheres to strict code quality, separation of concerns, rate-limiting, and relational data tracking.
 
 ---
 
-## ✨ Features
+## ✨ Key Features
 
-### 🎓 For Students
+### For Students / Users
+- **Unified AI Model Chat:** Real-time Server-Sent Events (SSE) streaming conversations with models like GPT-4o, Claude 3.5 Sonnet, and Gemini 2.0 Flash.
+- **Prompt Scoring Engine:** Automated, detailed feedback loops examining *Clarity, Specificity, Context, and Goal Orientation*. Generates tailored "Good" and "Bad" mock prompt examples for user education.
+- **Multi-Model Compare (Synchronous Benchmarking):** Capable of running a single prompt through up to 6 different models simultaneously while tracking precise token costs and response latencies.
+- **Custom AI Agents (Chatbots):** Create specialized agents armed with custom system instructions, strict guardrails, and retrievable knowledge bases.
+- **Artifact Management:** Save, bookmark, and organize model outputs (Code, Text, Image) across sessions.
+- **Gamified Leaderboard & Progress Tracking:** Tracks activity streaks, active days, session counts, and ranks users institutionally based on prompt-score averages.
 
-| Feature | Description |
-|---------|-------------|
-| **AI Model Chat** | Real-time streaming conversations with GPT-4, GPT-4o, Claude 3.5, Gemini 2.0 Flash, and more |
-| **Prompt Scoring** | AI-powered analysis with scores for Clarity, Specificity, Context, and Goal Orientation |
-| **Multi-Model Compare** | Compare responses from multiple models side-by-side in real-time |
-| **Custom AI Agents** | Create personalized agents with custom system prompts and knowledge bases |
-| **Progress Tracking** | Visual dashboards showing sessions, tokens, scores, and learning trends |
-| **Leaderboard** | Gamified learning with peer rankings based on prompt quality |
-| **Artifacts** | Save, organize, and export generated content and code snippets |
-| **Rich Markdown** | Full markdown rendering with syntax highlighting, LaTeX math, and copy functionality |
+### For Administrators
+- **Comprehensive Analytics:** Track real-time metric costs (in USD and INR equivalents), token consumption, and daily active user charts via Recharts.
+- **Centralized Guardrails Engine:** Inject 'AI Intent Detection' rules handling content safety and educational integrity. Instruct the LLM gateway to strictly block or guide specific inputs/outputs globally.
+- **Budget & Token Quotas:** Protect API budgets with per-student USD/Token limits alongside concurrent AI-endpoint rate limiting per user identity.
+- **User & API Management:** Manage course batches, reset passwords securely, track lockouts, and manage external provider API keys securely from the dashboard.
 
-### 👨‍💼 For Administrators
+---
 
-| Feature | Description |
-|---------|-------------|
-| **User Management** | Create, edit, suspend students with batch/course organization |
-| **Analytics Dashboard** | Real-time metrics: costs, tokens, sessions, active users by period |
-| **API Key Management** | Secure storage and rotation of provider API keys via dashboard |
-| **Model Configuration** | Enable/disable models, set pricing, test connectivity |
-| **Guardrails** | Content safety rules with AI intent detection |
-| **Token Quotas** | Per-student budget limits with automatic enforcement |
-| **Password Management** | Force password reset, view exceeded quotas, bulk operations |
+## 🏗 Architecture / System Design
+
+The application utilizes a **Monorepo-style** internal structure split into a decoupled **React/Vite Frontend** and a **Node.js/Express Backend** with **PostgreSQL**.
+
+### High-Level Topology
+1. **Frontend (Vite + React + TanStack Query):** Manages local state aggressively to minimize API round-trips. Splits access strictly between `/student/*` interfaces and `/admin/*` interfaces. UI is built via Tailwind CSS and Shadcn.
+2. **Backend Gateway (Express + TypeScript):** Acts as the central orchestrator routing user prompts to proper external APIs. Implements deep JWT-based authentication combined with rigorous security headers (Helmet) and IP/User-based rate limiting.
+3. **Database Layer (Prisma + PostgreSQL):** A fully relational state storing configuration, tracking API keys securely, maintaining session histories, and accumulating atomic wallet token transactions to prevent budget over-spending race conditions.
+4. **Third-Party AI Services:** Invoked dynamically based on Admin-populated keys and stored configurations. Costing maps dynamically map Input/Output token usage back to platform quotas.
+
+### Database Entity Relational Model (Core)
+- **`User`**: (Admin / Student roles) - Manages budget limits and token constraints.
+- **`Session` & `Message`**: Encapsulates standard ChatGPT-like interactions and individual token expenditures per request.
+- **`Chatbot` & `Guardrail`**: Creates modular isolated bots governed by specific rule combinations.
+- **`ComparisonSession` -> `ComparisonExchange` -> `ComparisonResponse`**: Tracks multi-model parallel tracking.
+- **`AIModel` & `APIKey`**: Admin controlled registry defining active external capabilities.
 
 ---
 
 ## 🛠 Tech Stack
 
 ### Frontend
-```
-React 18.3          │  UI Framework with Hooks
-TypeScript 5.6      │  Type Safety
-Vite 5.4            │  Build Tool & Dev Server
-TailwindCSS 3.4     │  Utility-First Styling
-Shadcn/UI           │  Accessible Component Library
-TanStack Query      │  Server State Management
-React Router 6      │  Client-Side Routing
-Framer Motion       │  Animations
-Recharts            │  Data Visualization
-```
+- **Framework:** React 18.3, Vite 5.4, TypeScript 5.8
+- **Styling:** Tailwind CSS 3.4, Shadcn/UI (Radix UI primitives)
+- **Data Fetching:** TanStack Query (React Query) v5
+- **Routing:** React Router v6
+- **Markdown & Math rendering:** React-Markdown, Remark-Math, Rehype-KaTeX
 
 ### Backend
-```
-Node.js 18+         │  Runtime Environment
-Express.js 4.21     │  Web Framework
-Prisma 5.22         │  ORM & Database Toolkit
-SQLite/PostgreSQL   │  Database (Dev/Prod)
-JWT                 │  Authentication
-Zod                 │  Schema Validation
-bcryptjs            │  Password Hashing
-Helmet              │  Security Headers
-```
-
-### AI Integrations
-```
-OpenAI              │  GPT-4, GPT-4o, GPT-4o-mini, DALL-E 3
-Anthropic           │  Claude 3.5 Sonnet, Claude 3 Opus
-Google AI           │  Gemini 2.0 Flash, Gemini 2.5 Pro
-ElevenLabs          │  Text-to-Speech (Coming Soon)
-```
+- **Framework:** Node.js, Express 4.21, TypeScript 5.6
+- **Database / ORM:** PostgreSQL, Prisma ORM 5.22
+- **Validation:** Zod
+- **Security:** bcryptjs, jsonwebtoken, express-rate-limit, helmet
+- **AI SDKs:** `@anthropic-ai/sdk`, `@google/generative-ai`, `openai`
 
 ---
 
-## 🚀 Getting Started
+## 🚀 Getting Started (Run Locally)
 
 ### Prerequisites
-
 - **Node.js** 18.0 or higher
-- **npm** 9.0+ or **yarn** 1.22+
+- **npm** (v9.0+) or **yarn**
 - **Git**
+- **PostgreSQL** database (Local instance or Docker container)
 
-### Installation
-
+### Step 1: Clone the repository
 ```bash
-# 1. Clone the repository
-git clone https://github.com/tanishksoni90/GenAI-Lab.git
+git clone https://github.com/your-org/GenAI-Lab.git
 cd GenAI-Lab
+```
 
-# 2. Install frontend dependencies
+### Step 2: Frontend Setup
+```bash
 npm install
+```
 
-# 3. Install backend dependencies
+### Step 3: Backend Setup
+```bash
 cd backend
 npm install
-
-# 4. Configure environment
 cp env.example .env
-# Edit .env with your settings (JWT secrets, etc.)
-
-# 5. Initialize database
-npx prisma migrate dev --name init
-npx prisma db seed
-
-# 6. Return to root
-cd ..
 ```
 
-### Running the Application
-
-**Development Mode:**
-
-```bash
-# Terminal 1: Start backend (http://localhost:3001)
-cd backend
-npm run dev
-
-# Terminal 2: Start frontend (http://localhost:8080)
-npm run dev
-```
-
-**Production Build:**
-
-```bash
-# Build frontend
-npm run build
-
-# Build backend
-cd backend
-npm run build
-npm start
-```
-
-### Default Credentials
-
-| Role | Email | Password |
-|------|-------|----------|
-| **Admin** | admin@genailab.com | Admin@123 |
-| **Student** | demo@student.com | Demo@123 |
-
-> ⚠️ **Important:** Change default passwords immediately after first login.
-
-### Configuring AI Providers
-
-1. Log in as Admin
-2. Navigate to **Admin Dashboard → API Keys**
-3. Add your API keys for each provider:
-   - OpenAI: https://platform.openai.com/api-keys
-   - Google AI: https://aistudio.google.com/apikey
-   - Anthropic: https://console.anthropic.com/settings/keys
-
----
-
-## 🏗 Architecture
-
-### System Overview
-
-```
-┌─────────────────────────────────────────────────────────────────┐
-│                         FRONTEND                                 │
-│  ┌─────────────┐  ┌─────────────┐  ┌─────────────────────────┐  │
-│  │   React +   │  │  TanStack   │  │    Shadcn/UI + Tailwind │  │
-│  │  TypeScript │  │    Query    │  │      Component Library  │  │
-│  └──────┬──────┘  └──────┬──────┘  └────────────┬────────────┘  │
-│         └────────────────┼──────────────────────┘               │
-│                          │ HTTP/SSE                              │
-└──────────────────────────┼──────────────────────────────────────┘
-                           │
-┌──────────────────────────┼──────────────────────────────────────┐
-│                          ▼                                       │
-│                      BACKEND                                     │
-│  ┌─────────────┐  ┌─────────────┐  ┌─────────────────────────┐  │
-│  │  Express.js │  │   Prisma    │  │     AI Service Layer    │  │
-│  │   Routes    │◄─┤    ORM      │  │  OpenAI/Anthropic/Google│  │
-│  └──────┬──────┘  └──────┬──────┘  └────────────┬────────────┘  │
-│         │                │                       │               │
-│         ▼                ▼                       ▼               │
-│  ┌─────────────┐  ┌─────────────┐  ┌─────────────────────────┐  │
-│  │   JWT Auth  │  │  SQLite/    │  │   Streaming (SSE)       │  │
-│  │  Middleware │  │  PostgreSQL │  │   Real-time Responses   │  │
-│  └─────────────┘  └─────────────┘  └─────────────────────────┘  │
-└─────────────────────────────────────────────────────────────────┘
-```
-
-### Database Schema
-
-```
-User ─────────┬──────────────┬──────────────┬──────────────┐
-              │              │              │              │
-              ▼              ▼              ▼              ▼
-           Session        Agent       Artifact    ComparisonSession
-              │              │                           │
-              ▼              ▼                           ▼
-           Message    AgentGuardrail            ComparisonExchange
-                                                        │
-                                                        ▼
-                                                ComparisonResponse
-```
-
-### Project Structure
-
-```
-GenAI-Lab/
-├── src/                          # Frontend source
-│   ├── components/
-│   │   └── ui/                   # Shadcn UI components
-│   ├── contexts/                 # React Context providers
-│   │   ├── AuthContext.tsx       # Authentication state
-│   │   └── ThemeContext.tsx      # Theme management
-│   ├── hooks/                    # Custom React hooks
-│   │   ├── useApi.ts             # TanStack Query hooks
-│   │   └── useAdminData.ts       # Admin data fetching
-│   ├── lib/                      # Utilities
-│   │   ├── api.ts                # API client
-│   │   └── modelPricing.ts       # Pricing utilities
-│   └── pages/
-│       ├── admin/                # Admin dashboard
-│       └── student/              # Student dashboard
-│
-├── backend/
-│   ├── prisma/
-│   │   ├── schema.prisma         # Database schema
-│   │   └── migrations/           # Migration history
-│   └── src/
-│       ├── config/
-│       │   ├── index.ts          # App configuration
-│       │   └── pricing.ts        # Model pricing
-│       ├── controllers/          # Request handlers
-│       ├── services/             # Business logic
-│       │   ├── ai.service.ts     # AI provider integrations
-│       │   ├── session.service.ts
-│       │   ├── comparison.service.ts
-│       │   └── scoring.service.ts
-│       ├── middleware/           # Express middleware
-│       └── routes/               # API route definitions
-│
-├── public/                       # Static assets
-└── package.json
-```
-
----
-
-## 📡 API Reference
-
-### Authentication
-
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| POST | `/api/auth/register` | Register new student |
-| POST | `/api/auth/login` | Login (returns JWT) |
-| POST | `/api/auth/refresh-token` | Refresh access token |
-| GET | `/api/auth/me` | Get current user profile |
-| POST | `/api/auth/change-password` | Change password |
-
-### Sessions & Messages
-
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| GET | `/api/sessions` | List user's sessions |
-| POST | `/api/sessions` | Create new session |
-| GET | `/api/sessions/:id/messages` | Get session messages |
-| POST | `/api/sessions/:id/messages` | Send message (non-streaming) |
-| POST | `/api/sessions/:id/messages/stream` | Send message (SSE streaming) |
-
-### Multi-Model Comparison
-
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| GET | `/api/comparison/categories` | Get model categories |
-| GET | `/api/comparison/models/:category` | Get models by category |
-| POST | `/api/comparison/start-exchange` | Start comparison session |
-| POST | `/api/comparison/stream-model` | Stream single model (SSE) |
-| GET | `/api/comparison/sessions` | Get comparison history |
-
-### Agents
-
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| GET | `/api/agents` | List user's agents |
-| POST | `/api/agents` | Create new agent |
-| PUT | `/api/agents/:id` | Update agent |
-| DELETE | `/api/agents/:id` | Delete agent |
-
-### Admin
-
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| GET | `/api/admin/students` | List all students |
-| GET | `/api/admin/analytics` | Get platform analytics |
-| GET | `/api/admin/api-keys` | Get API key status |
-| PUT | `/api/admin/api-keys/:provider` | Update API key |
-| GET | `/api/admin/models` | List all models |
-| POST | `/api/admin/models/:id/toggle` | Enable/disable model |
-
----
-
-## 💰 Pricing Model
-
-GenAI Lab uses a **virtual token system** for simplified student billing:
-
-```
-┌─────────────────────────────────────────────────────────┐
-│                    PRICING MODEL                         │
-├─────────────────────────────────────────────────────────┤
-│  Student Pays:        ₹2,000 enrollment fee             │
-│  Virtual Tokens:      50,000 tokens (display)           │
-│  Actual Budget:       $18 USD (~₹1,500) API usage       │
-│  Profit Margin:       ₹500 per student                  │
-├─────────────────────────────────────────────────────────┤
-│  Conversion Formula:                                     │
-│  Virtual Tokens = (USD Spent / $18) × 50,000            │
-└─────────────────────────────────────────────────────────┘
-```
-
-All costs are tracked in USD internally for accuracy, with INR conversion for display.
-
----
-
-## 🔒 Security
-
-- **JWT Authentication** with access/refresh token rotation
-- **Password Hashing** using bcrypt with salt rounds
-- **Rate Limiting** (100 requests per 15 minutes per IP)
-- **Helmet.js** security headers
-- **API Key Encryption** in database
-- **Input Validation** with Zod schemas
-- **CORS** configured for frontend origin
-
----
-
-## 🧪 Development
-
-### Environment Variables
-
+**Configure `.env` in Backend:**
+Update with your active DB URL and configure your strong JWT Secrets.
 ```env
-# Backend (.env)
 NODE_ENV=development
 PORT=3001
-DATABASE_URL="file:./dev.db"
-JWT_SECRET=your-secret-key
-JWT_REFRESH_SECRET=your-refresh-secret
+DATABASE_URL="postgresql://user:password@localhost:5432/genai_lab?schema=public"
+JWT_SECRET=super_secret_dev_key
+JWT_REFRESH_SECRET=super_secret_dev_refresh_key
 FRONTEND_URL=http://localhost:8080
+ADMIN_REGISTRATION_CODE=admin_secret_123
 ```
 
-### Database Commands
-
+### Step 4: Run Database Migrations & Seed
 ```bash
-# Generate Prisma client
 npx prisma generate
-
-# Run migrations
-npx prisma migrate dev
-
-# Reset database
-npx prisma migrate reset
-
-# Open Prisma Studio
-npx prisma studio
-
-# Seed database
-npm run db:seed
+npx prisma migrate dev --name init_postgresql
+npx prisma db seed
 ```
+*(The seed script populates default AI Model definitions, initial pricing references, UI states, and baseline Admin accounts).*
 
-### Code Quality
-
+### Step 5: Start Servers natively
+**Start the Backend API:**
 ```bash
-# Type checking
-npm run type-check
+cd backend
+npm run dev
+# Running on http://localhost:3001
+```
 
-# Linting
-npm run lint
-
-# Build verification
-npm run build
+**Start the Frontend App (New Terminal):**
+```bash
+cd GenAI-Lab
+npm run dev
+# Running on http://localhost:8080
 ```
 
 ---
 
-## 📊 Performance
+## 📡 API Documentation
 
-- **Streaming Responses**: Server-Sent Events for real-time AI output
-- **Query Caching**: TanStack Query with configurable stale times
-- **Optimistic Updates**: Immediate UI feedback
-- **Lazy Loading**: Route-based code splitting
-- **Virtual Token Calculation**: Lightweight cost tracking
+Below is the comprehensive API map. The application requires Bearer Token (`Authorization: Bearer <token>`) authentication for protected routes.
+
+### 1. Authentication (`/api/auth/*`)
+| Method | Endpoint | Description | Request Structure | Response Structure | Auth |
+|---|---|---|---|---|---|
+| POST | `/register` | Registers a student. | `email`, `password`, `name`, `registrationId` | `user` object, `tokens` (access/refresh) | None |
+| POST | `/admin-register` | Registers an admin. | `email`, `password`, `name`, `adminCode` | `user` object, `tokens` | None (Requires secret) |
+| POST | `/login` | Authenticates User/Admin | `email`, `password` | `user` object, `tokens` | None |
+| POST | `/refresh-token` | Rotates expiring access tokens | `refreshToken` | `tokens` | None |
+| GET | `/me` | Get current user | - | `user` object with quotas | **User/Admin** |
+
+### 2. Conversational Sessions (`/api/sessions/*`)
+| Method | Endpoint | Description | Request Structure | Auth |
+|---|---|---|---|---|
+| GET | `/` | List all user sessions | Query params: `page`, `limit`, `modelId`, `chatbotId` | **User** |
+| POST | `/` | Create a clean conversation | `modelId` (UUID), `chatbotId` (Optional UUID) | **User** |
+| GET | `/:id` | Fetch specific session metadata | - | **User** |
+| GET | `/:id/messages` | Load historical messages | - | **User** |
+| POST | `/:id/messages` | Post a standard text message | `content` (string) | **User** |
+| POST | `/:id/messages/stream` | Stream AI response output | `content` (string) | **User** |
+*Note: Streaming routes return exact HTTP Server-Sent Events (SSE) including `chunk`, `start`, `error`, and `done` payload events.*
+
+### 3. Custom Chatbots & Agents (`/api/chatbots/*`)
+| Method | Endpoint | Description | Request Structure | Auth |
+|---|---|---|---|---|
+| GET | `/` | Fetch active user chatbots | - | **User** |
+| POST | `/` | Mint a custom Agent | `name`, `description`, `modelId`, `behaviorPrompt`, `strictMode`, `knowledgeBase[]`, `guardrailIds[]` | **User** |
+| GET | `/:id` | Fetch specific chatbot payload | - | **User** |
+| PUT | `/:id` | Update Agent parameters | Fields identical to POST | **User** |
+| DELETE| `/:id` | Soft-deletes a chatbot | - | **User** |
+| GET | `/:id/stats` | Chatbot specific analytics | - | **User** |
+
+### 4. Multi-Model Comparison (`/api/comparison/*`)
+| Method | Endpoint | Description | Request Structure | Auth |
+|---|---|---|---|---|
+| POST | `/start-exchange` | Initiate parallel testing | `category`, `modelIds[]`, `prompt`, `comparisonSessionId` (optional) | **User** |
+| POST | `/run-model` | Execute isolated model call | `modelId`, `prompt`, `exchangeId` | **User** |
+| POST | `/stream-model` | Stream single comparison output| `modelId`, `prompt`, `exchangeId` (SSE Returns) | **User** |
+| GET | `/sessions` | Return all comparisons | - | **User** |
+
+### 5. Artifacts (`/api/artifacts/*`)
+| Method | Endpoint | Description | Request Structure | Auth |
+|---|---|---|---|---|
+| GET | `/` | Fetch all user artifacts | Query: `page`, `type`, `bookmarked` | **User** |
+| POST | `/` | Stash a piece of Code/Text/Image | `sessionId`, `type`, `title`, `content` | **User** |
+| POST | `/:id/bookmark` | Toggle active bookmark | - | **User** |
+
+### 6. Administration (`/api/admin/*`)
+| Method | Endpoint | Description | Notes | Auth |
+|---|---|---|---|---|
+| GET | `/students` | Enumerate all user metadata | Manage lockouts, quotas, un-enrollments | **Admin** |
+| POST | `/students/bulk` | Execute batch operations | Overwrite quotas, Force Reset Passwords | **Admin** |
+| POST | `/admin/api-keys` | Adjust external providers (OpenAI, etc.) | Requires highly secure valid `apiKey` inputs | **Admin** |
+| GET | `/analytics` | Fetches massive KPI topology | Pulls USD maps, total tokens, streak metrics | **Admin** |
+| POST | `/guardrails` | Define System Level Intent-Rules | Applies "Behavior", "Content Safety" | **Admin** |
 
 ---
 
-## 🗺 Roadmap
+## 🧪 Testing
 
-- [ ] Voice input/output integration
-- [ ] Image generation (DALL-E 3)
-- [ ] Assignment submission & grading
-- [ ] Team collaboration features
-- [ ] Mobile responsive improvements
-- [ ] Export to PDF/DOCX
-- [ ] WebSocket for real-time notifications
-- [ ] PostgreSQL production deployment
+Currently, the GenAI Lab emphasizes strictly typed endpoints via **Zod integration** on all Express controller routes. 
+
+**Future Roadmap:**
+Integration of `Jest` and `Supertest` specifically targeting the Atomic Transaction behavior within budgets (`session.service.ts`). As multiple concurrent requests are generated rapidly on parallel AI testing, validating that the PostgreSQL `prisma.$transaction` actively caps `tokenUsed` guarantees billing security.
 
 ---
 
-## 🤝 Contributing
+## 🚀 Deployment (Future Roadmap)
 
-This is a proprietary educational platform. For feature requests or bug reports, please contact the development team.
-
----
-
-## 📄 License
-
-This project is proprietary software developed for educational purposes. All rights reserved.
+For staging/production environments, consider this Docker-oriented path:
+1. **Containerize:** Scaffold `Dockerfile` configurations specifically optimizing layered node_modules for Express and multi-stage Vite builds for React.
+2. **Postgres Instances:** Scale DB via managed instances (e.g. AWS RDS / Supabase) bypassing the local developer instances. Note: Be sure to configure connection pooling on Prisma.
+3. **CI/CD:** Enforce automated TypeScript checks and eslint before merging MR's to the active branch.
 
 ---
 
-## 👨‍💻 Author
+## 🐛 Troubleshooting / FAQ
 
-**Tanishk Soni**
+**Q: I get "Insufficient Tokens" or "Account Locked" when testing API limits.**
+> You hit the active JWT user ratelimit or token hard-limit! Log in to the Admin Dashboard > Settings Tab. Ensure "Hard Limit Enforcement" is toggled appropriately and use the Admin overview to instantly provide the account an extended limit.
 
-- GitHub: [@tanishksoni90](https://github.com/tanishksoni90)
+**Q: The AI models aren't responding natively or fall back to "Mock Response".**
+> 1. Ensure you have populated your specific API Keys under Admin Dashboard -> API Keys.
+> 2. Ensure the specific Model definition is enabled under the "Models" tab.
+
+**Q: Database migration failed with "migration_lock" issues?**
+> Manually clear the prisma lock tables or delete your internal `.db` references if utilizing the legacy SQLite builds and trigger: `npx prisma migrate reset` explicitly.
 
 ---
 
-<p align="center">
-</p>
+## 📄 License & Ownership
+
+**Proprietary Software**
+This codebase is an internal training, analytics, and operational deployment framework developed by and strictly assigned to the operating institution. Open-source distribution is prohibited unless explicit, written consent is granted by stakeholders. 
+
+Dependencies managed under `package.json` follow their respective MIT/Apache sub-licenses.
