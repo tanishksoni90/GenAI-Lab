@@ -17,7 +17,10 @@
   <a href="#api-documentation">API Documentation</a> •
   <a href="#testing">Testing</a> •
   <a href="#deployment">Deployment</a> •
-  <a href="#troubleshooting--faq">Troubleshooting</a>
+  <a href="#troubleshooting--faq">Troubleshooting</a><br><br>
+  👉 <strong>Deep Dives:</strong> 
+  <a href="ARCHITECTURE.md">System Architecture Guide</a> | 
+  <a href="API_REFERENCE.md">Complete API Reference</a>
 </p>
 
 ---
@@ -51,6 +54,8 @@ As the repository transitions from initial architecture to a collaborative multi
 ---
 
 ## 🏗 Architecture / System Design
+
+> *For a detailed breakdown including sequence diagrams, ERDs, middleware flow, and component relationships, please see our dedicated **[System Architecture Guide](ARCHITECTURE.md)**.*
 
 The application utilizes a **Monorepo-style** internal structure split into a decoupled **React/Vite Frontend** and a **Node.js/Express Backend** with **PostgreSQL**.
 
@@ -151,6 +156,8 @@ npm run dev
 ---
 
 ## 📡 API Documentation
+
+> *For the exhaustive, granular endpoint specifications—including exact JSON Request/Response schemas, error constraints, and deep pagination logic—please refer to the full **[Complete API Reference](API_REFERENCE.md)**.*
 
 Below is the comprehensive API map. The application requires Bearer Token (`Authorization: Bearer <token>`) authentication for protected routes.
 
