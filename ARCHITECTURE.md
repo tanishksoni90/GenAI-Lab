@@ -8,51 +8,7 @@ This document provides a highly detailed technical breakdown of the **GenAI Lab*
 
 The overarching system operates on a modern, decoupled client-server architecture consisting of a React-based SPA (Single Page Application) frontend and an Express/Node.js stateful backend. 
 
-```mermaid
-graph TD
-    %% Define Nodes
-    Client["💻 Client Browser<br/>(React / Vite + Tailwind)"]
-    Gateway["🚀 API Gateway & Logic<br/>(Express / Node.js)"]
-    DB[("🗄️ Primary Database<br/>(PostgreSQL)")]
-    
-    subgraph "External AI Providers"
-        OpenAI("OpenAI API<br/>(GPT-4o)")
-        Anthropic("Anthropic API<br/>(Claude 3.5)")
-        Google("Google API<br/>(Gemini Flash)")
-    end
-
-    subgraph "Internal Core Services"
-        Auth["Auth & JWT Service"]
-        Budget["Billing & Quota Engine"]
-        Scoring["Prompt Scoring Engine"]
-        Guardrails["Guardrails & Safety Engine"]
-    end
-
-    %% Connections
-    Client -->|REST API / JSON| Gateway
-    Client -->|Server-Sent Events (SSE)| Gateway
-
-    Gateway -.-> Auth
-    Gateway -.-> Budget
-    Gateway -.-> Scoring
-    Gateway -.-> Guardrails
-    
-    Gateway -->|Prisma ORM| DB
-    
-    Gateway -->|Provider SDKs| OpenAI
-    Gateway -->|Provider SDKs| Anthropic
-    Gateway -->|Provider SDKs| Google
-
-    classDef frontend fill:#3b82f6,stroke:#1e40af,color:white;
-    classDef backend fill:#10b981,stroke:#047857,color:white;
-    classDef db fill:#f59e0b,stroke:#047857,color:white;
-    classDef external fill:#6366f1,stroke:#4338ca,color:white;
-
-    class Client frontend;
-    class Gateway,Auth,Budget,Scoring,Guardrails backend;
-    class DB db;
-    class OpenAI,Anthropic,Google external;
-```
+![High-Level System Architecture](High-Level%20System%20Architecture.png)
 
 ### Component Breakdown
 *   **Client Interface:** Handles state using TanStack Query to minimize redundant network calls. The UI is built using Shadcn primitives, ensuring a modular and accessible design system. SSE (Server-Sent Events) listeners are embedded directly in chat components for type-writer style token rendering.
@@ -65,46 +21,7 @@ graph TD
 
 The most critical flow in GenAI Lab is executing an AI prompt, returning it asynchronously to the user without timeout errors, and guaranteeing atomic token billing.
 
-```mermaid
-sequenceDiagram
-    autonumber
-    actor User
-    participant UI as React Frontend
-    participant API as Express (ai.service.ts)
-    participant Budget as Quota Engine
-    participant DB as PostgreSQL
-    participant LLM as External AI Provider
-
-    User->>UI: Submit Prompt ("Explain React")
-    UI->>API: POST /sessions/:id/stream (JWT attached)
-    
-    API->>DB: Fetch User Quotas & Wallet
-    API->>Budget: Validate available $USD & Tokens
-    
-    alt Over limit
-        Budget-->>API: Insufficient Funds Exception
-        API-->>UI: 403 Forbidden / Error Stream
-    else Has Quota
-        API->>DB: Insert Message (Role: User)
-        
-        API->>LLM: SDK Request (streaming: true)
-        API-->>UI: SSE Event: 'start' (Headers Sent)
-        
-        loop Token Generation
-            LLM-->>API: Token Chunk
-            API-->>UI: SSE Event: 'chunk'
-        end
-        
-        LLM-->>API: Request Complete (Usage Meta)
-        
-        API->>DB: BEGIN Prisma $transaction
-        API->>DB: Insert Message (Role: AI, Context data)
-        API->>DB: Atomic Update (Decrement User Quotas)
-        API->>DB: COMMIT
-        
-        API-->>UI: SSE Event: 'done' (Includes Score & Usage)
-    end
-```
+![AI Prompt Submission and Streaming Response](Al%20Prompt%20Submission%20and%20Streaming%20Response.png)
 
 ### Key Mechanisms:
 1.  **SSE Lifecycle:** By utilizing `text/event-stream`, the Node thread does not block heavily. Memory overhead per connection is kept minimal.
@@ -116,48 +33,7 @@ sequenceDiagram
 
 The relational schema heavily enforces normalized constraints to preserve analytical accuracy for the administrators.
 
-```mermaid
-erDiagram
-    USER ||--o{ SESSION : creates
-    USER ||--o{ CHATBOT : owns
-    USER ||--o{ COMPARISON_SESSION : initiates
-    USER ||--o{ ARTIFACT : stores
-
-    SESSION ||--o{ MESSAGE : contains
-    SESSION }o--|| AI_MODEL : powered_by
-    SESSION }o--o| CHATBOT : restricted_by
-    
-    CHATBOT ||--o{ CHATBOT_KNOWLEDGE : contains
-    CHATBOT }o--o{ GUARDRAIL : implements
-
-    COMPARISON_SESSION ||--o{ COMPARISON_EXCHANGE : consists_of
-    COMPARISON_EXCHANGE ||--o{ COMPARISON_RESPONSE : records
-    COMPARISON_RESPONSE }o--|| AI_MODEL : generated_by
-
-    AI_MODEL {
-        uuid id PK
-        string provider "OpenAI, Anthropic"
-        string codeName "gpt-4o"
-        float inputTokenCost
-        float outputTokenCost
-    }
-
-    USER {
-        uuid id PK
-        enum role "ADMIN | STUDENT"
-        float usdQuota
-        float usdUsed
-        int tokenLimit
-    }
-
-    MESSAGE {
-        uuid id PK
-        uuid sessionId FK
-        enum role "USER | AI | SYSTEM"
-        text content
-        int tokensUsed
-    }
-```
+![AI Chat Platform Data Model](Al%20Chat%20Platform%20Data%20Model.png)
 
 ### Schema Highlights:
 *   **Virtual Wallets:** The `User` table acts as a pseudo-ledger. `usdQuota` vs `usdUsed`.
@@ -169,28 +45,7 @@ erDiagram
 
 To achieve synchronous benchmarking without degrading performance, the backend uses `Promise.allSettled()` connected to independent Service Workers.
 
-```mermaid
-graph LR
-    Req[POST /start-exchange<br/>(2 to 6 Models)]
-    
-    subgraph Parallel Dispatch Engine
-        Worker1[Task: Model A (GPT-4)]
-        Worker2[Task: Model B (Claude)]
-        Worker3[Task: Model C (Gemini)]
-    end
-    
-    Req --> Worker1
-    Req --> Worker2
-    Req --> Worker3
-
-    subgraph Error Handling & Aggregation
-        Worker1 --> |Success + Timing| Reducer
-        Worker2 --> |Failure / Timeout| Reducer
-        Worker3 --> |Success + Timing| Reducer
-    end
-    
-    Reducer --> BatchInsert[(DB: Bulk Insert <br/> Comparison Responses)]
-```
+![Multi-Model Comparison Execution Flow](Multi-Model%20Comparison%20Execution%20Flow.png)
 
 ### Explanation:
 When a user launches a comparison request (e.g., testing "GPT-4" vs "Claude 3.5"), the request hits the `comparison.service.ts` controller. 
@@ -205,31 +60,7 @@ When a user launches a comparison request (e.g., testing "GPT-4" vs "Claude 3.5"
 
 Every secured route passes through a rigorous set of verification layers before touching the core logic.
 
-```mermaid
-graph TD
-    IncomingRequest(Incoming HTTP Request)
-    
-    L1{1. Rate Limiting / DDoS Defense}
-    L2{2. Helmet / CORS Headers}
-    L3{3. JWT Auth Verification}
-    L4{4. Zod Input Validation}
-    L5{5. Guardrail System Checks}
-    L6[Controller / Logic Execution]
-    
-    IncomingRequest --> L1
-    L1 -- Pass --> L2
-    L1 -- Fail --> 429[429 Too Many Requests]
-    
-    L2 --> L3
-    L3 -- Valid Token --> L4
-    L3 -- Invalid --> 401[401 Unauthorized]
-    
-    L4 -- Schema Matches --> L5
-    L4 -- Schema Mismatch --> 400[400 Bad Request]
-    
-    L5 -- Content Safe --> L6
-    L5 -- Pattern Detected --> 403[403 Blocked by Guardrail]
-```
+![Security & Gatekeeping Layers (Middleware)](Security%20&%20Gatekeeping%20Layers%20(Middleware).png)
 
 ### Guardrails Mechanism (`guardrail.service.ts`):
 *   Acts as a semantic and regex layer.
